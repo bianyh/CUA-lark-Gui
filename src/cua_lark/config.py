@@ -45,6 +45,8 @@ class Settings:
     max_steps: int = 15
     max_retries: int = 2
     mock_mode: bool = False
+    ocr_backend: str = "paddleocr"
+    paddleocr_lang: str = "ch"
 
     @classmethod
     def from_env(cls, repo_root: Path | None = None) -> "Settings":
@@ -63,6 +65,8 @@ class Settings:
             max_steps=_parse_int(os.getenv("CUA_MAX_STEPS"), 15),
             max_retries=_parse_int(os.getenv("CUA_MAX_RETRIES"), 2),
             mock_mode=_parse_bool(os.getenv("CUA_MOCK_MODE"), False),
+            ocr_backend=os.getenv("CUA_OCR_BACKEND", "paddleocr"),
+            paddleocr_lang=os.getenv("CUA_PADDLE_OCR_LANG", "ch"),
         )
 
     def ensure_runtime_dirs(self) -> None:
@@ -71,4 +75,3 @@ class Settings:
 
     def with_mock_mode(self, mock_mode: bool) -> "Settings":
         return replace(self, mock_mode=mock_mode)
-

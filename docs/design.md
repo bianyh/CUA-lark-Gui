@@ -52,7 +52,7 @@ Each run follows:
 
 - Real execution uses `pyautogui` and optional `pygetwindow`.
 - Screenshots use Pillow `ImageGrab`.
-- OCR is optional and defaults to a null provider until Tesseract is installed.
+- OCR uses `PaddleOCR` by default and falls back to a null provider when PaddleOCR cannot be imported in the local environment.
 - Windows UI automation data is intentionally not required for correctness, only for future hint fusion.
 
 ## Bundled Case Strategy
@@ -85,4 +85,3 @@ These files together support replay, judging, and postmortem analysis.
 - Improve model prompts for robust target grounding.
 - Add additional Calendar and Docs tasks.
 - Introduce run-level dashboards once stable JSON metrics exist.
-

@@ -6,7 +6,7 @@ Vision-first GUI testing agent for the Feishu desktop client, built for the Feis
 
 - A modular CUA runtime with `observe -> plan -> execute -> validate -> report`.
 - An OpenAI-compatible vision policy adapter with `responses` first and `chat.completions` fallback.
-- Optional Windows desktop automation integrations for screenshot capture, OCR, and mouse/keyboard control.
+- Optional Windows desktop automation integrations for screenshot capture, Paddle OCR, and mouse/keyboard control.
 - Structured Feishu test case definitions for IM and Calendar MVP scenarios.
 - A reporting pipeline that emits `run.json`, `report.md`, and a screenshot timeline per run.
 
@@ -77,7 +77,14 @@ tests/                  Lightweight unit tests for the core loop
 ## Runtime Modes
 
 - `--mock`: Uses synthetic screenshots and a mock executor. This is the safe default for CI and architecture validation.
-- Desktop mode: Requires Windows, Feishu desktop client, `pyautogui`, and optional OCR tooling such as Tesseract.
+- Desktop mode: Requires Windows, Feishu desktop client, `pyautogui`, and Paddle OCR availability.
+
+## OCR Backend
+
+- The project uses `PaddleOCR` as the default OCR backend.
+- Configure it with `CUA_OCR_BACKEND=paddleocr` and `CUA_PADDLE_OCR_LANG=ch`.
+- Use `python -m cua_lark doctor` to confirm whether PaddleOCR is importable in the current environment.
+- If `doctor` shows a PaddleOCR import failure, a common local cause is an incompatible `NumPy` / compiled dependency mix. The runtime will fall back to no OCR instead of crashing immediately.
 
 ## Git Workflow
 
@@ -95,11 +102,10 @@ tests/                  Lightweight unit tests for the core loop
 ## Next Steps After This Bootstrap
 
 - Replace scripted action hints with stronger model-driven grounding.
-- Add real OCR via Tesseract or RapidOCR for Chinese-heavy screens.
+- Stabilize PaddleOCR dependencies in the base environment and add richer OCR post-processing for Feishu-specific text patterns.
 - Add richer Windows UIA hints without making them the sole source of truth.
 - Introduce replay and trace-to-dataset export for later self-healing and tuning.
 
 ## Design Document
 
 See [docs/design.md](docs/design.md) for the system architecture, module boundaries, data flow, and milestone plan.
-

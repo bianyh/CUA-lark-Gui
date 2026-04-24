@@ -8,7 +8,7 @@ from cua_lark.executors.base import DesktopExecutor
 from cua_lark.executors.mock import MockDesktopExecutor
 from cua_lark.executors.windows import WindowsDesktopExecutor
 from cua_lark.models import Observation, ReplanReason, RunReport, StepRecord, TaskSpec, ValidationResult
-from cua_lark.perception.ocr import NullOCRProvider, OCRProvider, TesseractOCRProvider
+from cua_lark.perception.ocr import NullOCRProvider, OCRProvider, PaddleOCRProvider, paddleocr_diagnostics
 from cua_lark.perception.screenshot import Screenshotter
 from cua_lark.planning.hybrid import HybridPlanner
 from cua_lark.providers.base import VisionPolicy
@@ -244,10 +244,17 @@ def build_default_runner(settings: Settings) -> AgentRunner:
             executor = WindowsDesktopExecutor()
         except Exception:
             executor = MockDesktopExecutor()
-        try:
-            ocr_provider = TesseractOCRProvider()
-        except Exception:
-            ocr_provider = NullOCRProvider()
+        if settings.ocr_backend == "none":
+            ocr_provider = NullOCRProvider("OCR backend disabled by configuration.")
+        else:
+            diagnostics = paddleocr_diagnostics()
+            if diagnostics["importable"]:
+                ocr_provider = PaddleOCRProvider(language=settings.paddleocr_lang)
+            else:
+                reason = diagnostics["error"] or diagnostics.get("stderr_tail") or "unknown import error"
+                ocr_provider = NullOCRProvider(
+                    f"PaddleOCR unavailable, falling back to no OCR: {reason}"
+                )
 
     planner = HybridPlanner(policy=policy)
     screenshotter = Screenshotter(mock_mode=settings.mock_mode or isinstance(executor, MockDesktopExecutor))

@@ -7,6 +7,7 @@ import shutil
 from cua_lark.cases.loader import discover_case_files, load_task_spec
 from cua_lark.config import Settings
 from cua_lark.models import AssertionSpec, TaskSpec
+from cua_lark.perception.ocr import paddleocr_diagnostics
 from cua_lark.runner import build_default_runner
 
 
@@ -18,6 +19,13 @@ class CaseLoaderTest(unittest.TestCase):
         self.assertEqual(task.id, "im_send_message")
         self.assertEqual(task.product, "im")
         self.assertGreaterEqual(len(task.scripted_actions), 1)
+
+    def test_paddleocr_diagnostics_returns_expected_shape(self) -> None:
+        diagnostics = paddleocr_diagnostics()
+        self.assertIn("package_found", diagnostics)
+        self.assertIn("package_version", diagnostics)
+        self.assertIn("importable", diagnostics)
+        self.assertIn("error", diagnostics)
 
 
 class MockRunnerTest(unittest.TestCase):

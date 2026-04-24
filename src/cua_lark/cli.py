@@ -6,6 +6,7 @@ from pathlib import Path
 
 from cua_lark.cases.loader import discover_case_files, load_case_directory, load_task_spec
 from cua_lark.config import Settings
+from cua_lark.perception.ocr import paddleocr_diagnostics
 from cua_lark.runner import build_default_runner
 
 
@@ -47,6 +48,7 @@ def main(argv: list[str] | None = None) -> int:
 
 
 def _doctor(settings: Settings, as_json: bool) -> int:
+    ocr_diagnostics = paddleocr_diagnostics()
     diagnostics = {
         "repo_root": str(settings.repo_root),
         "python_mode": "mock" if settings.mock_mode else "desktop",
@@ -55,6 +57,12 @@ def _doctor(settings: Settings, as_json: bool) -> int:
         "openai_api_key_set": bool(settings.openai_api_key),
         "artifacts_dir": str(settings.artifact_root),
         "reports_dir": str(settings.report_root),
+        "ocr_backend": settings.ocr_backend,
+        "paddleocr_lang": settings.paddleocr_lang,
+        "paddleocr_package_found": ocr_diagnostics["package_found"],
+        "paddleocr_package_version": ocr_diagnostics["package_version"],
+        "paddleocr_importable": ocr_diagnostics["importable"],
+        "paddleocr_error": ocr_diagnostics["error"],
     }
     if as_json:
         print(json.dumps(diagnostics, ensure_ascii=False, indent=2))
@@ -91,4 +99,3 @@ def _run_suite(settings: Settings, case_dir: Path) -> int:
         print(f"task={report.task_id} status={report.status}")
         failed += 0 if report.status == "success" else 1
     return 0 if failed == 0 else 1
-
