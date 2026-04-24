@@ -241,8 +241,16 @@ class AgentRunner:
         visible_texts = state.get("visible_texts", [])
         if isinstance(visible_texts, list):
             overlay_lines.extend(str(item) for item in visible_texts[:10])
-        image_path, screen_size = self.screenshotter.capture(screenshot_path, overlay_lines=overlay_lines)
+        region = self.executor.capture_region()
+        if region is not None:
+            overlay_lines.append(f"capture_region={region}")
+        image_path, screen_size, capture_mode = self.screenshotter.capture(
+            screenshot_path,
+            overlay_lines=overlay_lines,
+            region=region,
+        )
         ocr_blocks = self.ocr_provider.extract(image_path)
+        state["capture_mode"] = capture_mode
         return Observation(
             screenshot_path=str(image_path),
             timestamp=datetime.now(UTC),

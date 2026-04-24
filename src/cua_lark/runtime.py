@@ -41,9 +41,15 @@ class RuntimeConsole:
 
     def observation(self, step_index: int, observation: Observation) -> None:
         preview = self._observation_preview(observation)
+        capture_mode = observation.ui_hints.get("capture_mode", "unknown")
+        capture_mode_text = {
+            "mock": "Mock 占位图",
+            "window": "窗口截图",
+            "full_screen": "整屏截图",
+        }.get(str(capture_mode), str(capture_mode))
         self._emit(
             f"观察 {step_index}",
-            f"截图已采集，OCR块数={len(observation.ocr_blocks)}，窗口=`{observation.window_title}`，"
+            f"截图已采集，模式={capture_mode_text}，OCR块数={len(observation.ocr_blocks)}，窗口=`{observation.window_title}`，"
             f"内容预览={preview}",
         )
 

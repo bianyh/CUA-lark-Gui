@@ -12,10 +12,16 @@ class Screenshotter:
         self.mock_mode = mock_mode
         self.mock_size = mock_size
 
-    def capture(self, output_path: Path, overlay_lines: Sequence[str] | None = None) -> tuple[Path, tuple[int, int]]:
+    def capture(
+        self,
+        output_path: Path,
+        overlay_lines: Sequence[str] | None = None,
+        region: tuple[int, int, int, int] | None = None,
+    ) -> tuple[Path, tuple[int, int], str]:
         output_path.parent.mkdir(parents=True, exist_ok=True)
         if self.mock_mode:
-            image = Image.new("RGB", self.mock_size, color=(245, 247, 250))
+            size = (region[2], region[3]) if region is not None else self.mock_size
+            image = Image.new("RGB", size, color=(245, 247, 250))
             draw = ImageDraw.Draw(image)
             lines = list(overlay_lines or [])
             lines.insert(0, "CUA-Lark mock screenshot")
@@ -23,8 +29,14 @@ class Screenshotter:
             for index, line in enumerate(lines):
                 draw.text((24, 24 + index * 28), line, fill=(26, 32, 44))
             image.save(output_path)
-            return output_path, image.size
+            return output_path, image.size, "mock"
+
+        if region is not None:
+            left, top, width, height = region
+            image = ImageGrab.grab(bbox=(left, top, left + width, top + height))
+            image.save(output_path)
+            return output_path, image.size, "window"
 
         image = ImageGrab.grab(all_screens=True)
         image.save(output_path)
-        return output_path, image.size
+        return output_path, image.size, "full_screen"

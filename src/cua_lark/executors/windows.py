@@ -27,8 +27,10 @@ class WindowsDesktopExecutor(DesktopExecutor):
         except ImportError:
             gw = None
         self._gw = gw
+        self._window_keyword: str | None = None
 
     def focus_window(self, keyword: str) -> bool:
+        self._window_keyword = keyword
         if not self._gw:
             return False
         candidates = self._gw.getWindowsWithTitle(keyword)
@@ -42,6 +44,36 @@ class WindowsDesktopExecutor(DesktopExecutor):
             return True
         except Exception:
             return False
+
+    def capture_region(self) -> tuple[int, int, int, int] | None:
+        if not self._gw or not self._window_keyword:
+            return None
+        try:
+            candidates = self._gw.getWindowsWithTitle(self._window_keyword)
+        except Exception:
+            return None
+        if not candidates:
+            return None
+        window = candidates[0]
+        try:
+            left = int(window.left)
+            top = int(window.top)
+            width = int(window.width)
+            height = int(window.height)
+        except Exception:
+            return None
+        if width <= 0 or height <= 0:
+            return None
+        return (left, top, width, height)
+
+    def snapshot_state(self) -> dict[str, Any]:
+        state: dict[str, Any] = {}
+        region = self.capture_region()
+        if region is not None:
+            state["capture_region"] = list(region)
+        if self._window_keyword:
+            state["focused_window_keyword"] = self._window_keyword
+        return state
 
     def execute(self, step: ActionStep) -> dict[str, Any]:
         pyautogui = self._pyautogui

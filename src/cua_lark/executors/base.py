@@ -21,3 +21,6 @@ class DesktopExecutor(ABC):
 
     def reset(self) -> None:
         return None
+
+    def capture_region(self) -> tuple[int, int, int, int] | None:
+        return None
