@@ -1,0 +1,40 @@
+id: im_mention_member
+product: im
+instruction: 在飞书 IM 中打开“测试群”，发送“@张三 请查看回归结果”，并确认 @ 提及内容可见。
+preconditions:
+  - 飞书桌面客户端已登录。
+  - 测试群中存在成员张三。
+assertions:
+  - type: ocr_contains
+    expected_text: 张三
+    description: 画面中应可见被提及成员名。
+  - type: ocr_contains
+    expected_text: 请查看回归结果
+    description: 画面中应可见消息内容。
+tags:
+  - im
+  - mention
+  - regression
+metadata:
+  window_title_keyword: 飞书
+  scripted_actions:
+    - action_type: hotkey
+      description: 打开全局搜索
+      hotkey: [ctrl, k]
+      validation_hint: 搜索
+    - action_type: type_text
+      description: 输入群名称
+      text: 测试群
+      validation_hint: 测试群
+    - action_type: wait
+      description: 等待群会话加载
+      wait_seconds: 1.0
+    - action_type: type_text
+      description: 输入带提及的消息
+      text: "@张三 请查看回归结果"
+      validation_hint: 张三
+    - action_type: hotkey
+      description: 发送消息
+      hotkey: [enter]
+      validation_hint: 请查看回归结果
+

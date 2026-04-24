@@ -1,0 +1,41 @@
+id: calendar_create_event
+product: calendar
+instruction: 打开飞书日历，创建一个主题为“项目周会”的会议，时间为明天下午 2 点，并邀请张三参加。
+preconditions:
+  - 飞书桌面客户端已登录。
+  - 日历功能可用。
+  - 张三可被搜索并邀请。
+assertions:
+  - type: ocr_contains
+    expected_text: 项目周会
+    description: 日历界面应显示新建会议主题。
+  - type: vlm_semantic
+    expected_text: 已成功创建并展示项目周会会议
+    description: 视觉语义应能判断会议已被创建。
+tags:
+  - mvp
+  - calendar
+  - creation
+metadata:
+  window_title_keyword: 飞书
+  scripted_actions:
+    - action_type: hotkey
+      description: 打开全局搜索
+      hotkey: [ctrl, k]
+      validation_hint: 搜索
+    - action_type: type_text
+      description: 搜索日历
+      text: 日历
+      validation_hint: 日历
+    - action_type: wait
+      description: 等待日历页面
+      wait_seconds: 1.5
+    - action_type: type_text
+      description: 输入会议主题
+      text: 项目周会
+      validation_hint: 项目周会
+    - action_type: type_text
+      description: 输入参会人
+      text: 张三
+      validation_hint: 张三
+

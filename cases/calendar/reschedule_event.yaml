@@ -1,0 +1,35 @@
+id: calendar_reschedule_event
+product: calendar
+instruction: 在飞书日历中找到“项目周会”，将会议改到明天下午 3 点，并确认新时间生效。
+preconditions:
+  - 飞书桌面客户端已登录。
+  - 已存在名称为“项目周会”的会议。
+assertions:
+  - type: ocr_contains
+    expected_text: 项目周会
+    description: 会议主题应仍然可见。
+  - type: ocr_contains
+    expected_text: 3:00
+    description: 新时间应显示为 3:00。
+tags:
+  - calendar
+  - reschedule
+metadata:
+  window_title_keyword: 飞书
+  scripted_actions:
+    - action_type: hotkey
+      description: 打开全局搜索
+      hotkey: [ctrl, k]
+      validation_hint: 搜索
+    - action_type: type_text
+      description: 搜索项目周会
+      text: 项目周会
+      validation_hint: 项目周会
+    - action_type: wait
+      description: 等待会议详情展示
+      wait_seconds: 1.0
+    - action_type: type_text
+      description: 输入新的会议时间
+      text: 3:00 PM
+      validation_hint: 3:00
+

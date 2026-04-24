@@ -1,0 +1,42 @@
+id: im_send_message
+product: im
+instruction: 在飞书 IM 中搜索“测试群”，发送一条消息“Hello World”，并确认发送成功。
+preconditions:
+  - 飞书桌面客户端已登录。
+  - “测试群”会话存在且允许发送消息。
+assertions:
+  - type: ocr_contains
+    expected_text: Hello World
+    description: 当前界面应出现 Hello World 文本。
+  - type: vlm_semantic
+    expected_text: 成功向测试群发送了 Hello World
+    description: 视觉语义上应可判断消息已发送成功。
+cleanup:
+  - 如果使用真实环境，必要时删除测试消息。
+tags:
+  - mvp
+  - im
+  - regression
+metadata:
+  window_title_keyword: 飞书
+  scripted_actions:
+    - action_type: hotkey
+      description: 打开全局搜索
+      hotkey: [ctrl, k]
+      validation_hint: 搜索
+    - action_type: type_text
+      description: 输入群名称
+      text: 测试群
+      validation_hint: 测试群
+    - action_type: wait
+      description: 等待搜索结果稳定
+      wait_seconds: 1.2
+    - action_type: type_text
+      description: 输入消息正文
+      text: Hello World
+      validation_hint: Hello World
+    - action_type: hotkey
+      description: 发送消息
+      hotkey: [enter]
+      validation_hint: Hello World
+

@@ -1,0 +1,40 @@
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "cua-lark-gui"
+version = "0.1.0"
+description = "Vision-first GUI testing agent for the Feishu desktop client."
+readme = "README.md"
+requires-python = ">=3.11"
+authors = [{ name = "bianyh" }]
+dependencies = [
+  "openai>=1.75.0",
+  "Pillow>=10.4.0",
+  "PyYAML>=6.0.1",
+]
+
+[project.optional-dependencies]
+desktop = [
+  "pyautogui>=0.9.54",
+  "pygetwindow>=0.0.9",
+  "pytesseract>=0.3.10",
+]
+dev = [
+  "ruff>=0.11.0",
+]
+
+[project.scripts]
+cua-lark = "cua_lark.cli:main"
+
+[tool.setuptools]
+package-dir = { "" = "src" }
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.ruff]
+line-length = 100
+target-version = "py312"
+

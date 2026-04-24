@@ -1,0 +1,40 @@
+id: im_calendar_handoff
+product: cross_product
+instruction: 在 IM 中确认已收到与“项目周会”相关的消息后，跳转到日历并验证对应会议存在。
+preconditions:
+  - 飞书桌面客户端已登录。
+  - IM 中已有项目周会相关通知。
+  - 日历中存在对应会议。
+assertions:
+  - type: ocr_contains
+    expected_text: 项目周会
+    description: IM 或 Calendar 界面中应可见项目周会。
+  - type: vlm_semantic
+    expected_text: 已在 IM 和 Calendar 中验证到同一会议上下文
+    description: 视觉语义上应判断联动验证成功。
+tags:
+  - cross-product
+  - im
+  - calendar
+metadata:
+  window_title_keyword: 飞书
+  scripted_actions:
+    - action_type: hotkey
+      description: 打开全局搜索
+      hotkey: [ctrl, k]
+      validation_hint: 搜索
+    - action_type: type_text
+      description: 搜索项目周会相关消息
+      text: 项目周会
+      validation_hint: 项目周会
+    - action_type: wait
+      description: 等待消息结果出现
+      wait_seconds: 1.0
+    - action_type: hotkey
+      description: 切换到日历场景
+      hotkey: [ctrl, 2]
+      validation_hint: 日历
+    - action_type: type_text
+      description: 在日历中搜索项目周会
+      text: 项目周会
+      validation_hint: 项目周会
