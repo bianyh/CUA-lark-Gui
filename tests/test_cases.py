@@ -3,8 +3,6 @@ from __future__ import annotations
 import unittest
 from pathlib import Path
 import shutil
-import tempfile
-
 from cua_lark.cases.loader import discover_case_files, load_task_spec
 from cua_lark.config import Settings
 from cua_lark.models import AssertionSpec, TaskSpec
@@ -32,8 +30,12 @@ class CaseLoaderTest(unittest.TestCase):
 
 class MockRunnerTest(unittest.TestCase):
     def test_mock_screenshotter_respects_region_size(self) -> None:
-        with tempfile.TemporaryDirectory(dir="tests") as tmpdir:
-            path = Path(tmpdir) / "region_mock.png"
+        root = Path("tests") / ".tmp" / "screenshotter"
+        if root.exists():
+            shutil.rmtree(root)
+        root.mkdir(parents=True, exist_ok=True)
+        try:
+            path = root / "region_mock.png"
             screenshotter = Screenshotter(mock_mode=True)
             _, size, capture_mode = screenshotter.capture(
                 path,
@@ -42,6 +44,9 @@ class MockRunnerTest(unittest.TestCase):
             )
             self.assertEqual(size, (640, 480))
             self.assertEqual(capture_mode, "mock")
+        finally:
+            if root.exists():
+                shutil.rmtree(root)
 
     def test_mock_runner_generates_artifacts(self) -> None:
         root = Path("tests") / ".tmp" / "mock_runner"

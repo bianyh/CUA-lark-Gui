@@ -28,3 +28,4 @@ Thumbs.db
 artifacts/
 reports/generated/
 tests/.tmp/
+tests/tmp*/
