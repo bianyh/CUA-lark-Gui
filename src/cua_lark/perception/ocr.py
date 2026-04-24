@@ -28,7 +28,7 @@ class OCRProvider(ABC):
 class NullOCRProvider(OCRProvider):
     backend_name = "none"
 
-    def __init__(self, reason: str = "OCR is disabled.") -> None:
+    def __init__(self, reason: str = "OCR 已禁用。") -> None:
         self.reason = reason
 
     def extract(self, image_path: Path) -> list[OCRBlock]:
@@ -71,14 +71,14 @@ class PaddleOCRProvider(OCRProvider):
         try:
             from paddleocr import PaddleOCR  # type: ignore
         except ImportError as exc:
-            self._status_message = f"import failed: {exc}"
+            self._status_message = f"PaddleOCR 导入失败：{exc}"
             raise RuntimeError(
-                "PaddleOCR is not available. Install a compatible PaddleOCR stack first."
+                "PaddleOCR 不可用，请先安装兼容的 PaddleOCR 运行环境。"
             ) from exc
         except Exception as exc:
-            self._status_message = f"import failed: {exc}"
+            self._status_message = f"PaddleOCR 导入失败：{exc}"
             raise RuntimeError(
-                f"PaddleOCR import failed. A common cause is incompatible compiled dependencies. Details: {exc}"
+                f"PaddleOCR 导入失败。常见原因是 NumPy 或其他已编译依赖不兼容。详情：{exc}"
             ) from exc
 
         self._engine = PaddleOCR(
@@ -199,7 +199,7 @@ def paddleocr_diagnostics() -> dict[str, Any]:
         "error": None,
     }
     if not package_found:
-        diagnostics["error"] = "package not found"
+        diagnostics["error"] = "未找到 paddleocr 包"
         return diagnostics
 
     probe_script = """

@@ -79,6 +79,13 @@ tests/                  Lightweight unit tests for the core loop
 - `--mock`: Uses synthetic screenshots and a mock executor. This is the safe default for CI and architecture validation.
 - Desktop mode: Requires Windows, Feishu desktop client, `pyautogui`, and Paddle OCR availability.
 
+## Runtime Logs
+
+- The CLI now prints Chinese runtime status messages for observation, planning, execution, validation, retries, and report generation.
+- Control it with `CUA_RUNTIME_LOGS=true|false`.
+- Control preview length with `CUA_RUNTIME_PREVIEW_CHARS=80`.
+- This is useful when you want to watch model decisions, fallback behavior, and workflow progress in real time while testing Feishu.
+
 ## OCR Backend
 
 - The project uses `PaddleOCR` as the default OCR backend.

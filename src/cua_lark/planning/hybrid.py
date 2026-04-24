@@ -31,7 +31,7 @@ class HybridPlanner:
             return PlanningResult(
                 decision=PolicyDecision(
                     done=False,
-                    rationale=f"Using scripted action {scripted_index + 1}/{len(scripted_actions)}.",
+                    rationale=f"采用预置脚本动作 {scripted_index + 1}/{len(scripted_actions)}。",
                     action=action,
                 ),
                 scripted=True,
@@ -41,7 +41,7 @@ class HybridPlanner:
             return PlanningResult(
                 decision=PolicyDecision(
                     done=True,
-                    rationale="No scripted actions remain and no vision policy is configured.",
+                    rationale="预置脚本动作已执行完，且当前没有可用的视觉策略。",
                 ),
                 scripted=False,
             )
@@ -50,4 +50,3 @@ class HybridPlanner:
             decision=self.policy.plan_next_action(task, observation, history, remaining_steps),
             scripted=False,
         )
-

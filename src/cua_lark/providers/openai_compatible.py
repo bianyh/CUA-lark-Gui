@@ -21,6 +21,8 @@ from cua_lark.utils.images import encode_image_as_data_url
 
 
 class OpenAICompatibleVisionPolicy(VisionPolicy):
+    backend_name = "openai_compatible"
+
     def __init__(self, settings: Settings) -> None:
         try:
             from openai import OpenAI
@@ -32,6 +34,8 @@ class OpenAICompatibleVisionPolicy(VisionPolicy):
 
         self._client = OpenAI(api_key=settings.openai_api_key, base_url=settings.openai_base_url)
         self._settings = settings
+        self.last_transport: str | None = None
+        self.last_error: str | None = None
 
     def plan_next_action(
         self,
@@ -97,9 +101,12 @@ class OpenAICompatibleVisionPolicy(VisionPolicy):
             )
             output_text = getattr(response, "output_text", None)
             if output_text:
+                self.last_transport = "responses"
+                self.last_error = None
                 return str(output_text)
-        except Exception:
-            pass
+        except Exception as exc:
+            self.last_transport = "responses_failed"
+            self.last_error = str(exc)
 
         completion = self._client.chat.completions.create(
             model=self._settings.openai_model,
@@ -115,6 +122,7 @@ class OpenAICompatibleVisionPolicy(VisionPolicy):
                 },
             ],
         )
+        self.last_transport = "chat.completions"
         return completion.choices[0].message.content or "{}"
 
     def _extract_json(self, raw: str) -> dict:
@@ -142,6 +150,7 @@ You are controlling the Feishu desktop client as a testing agent.
 Return strict JSON with keys: done, rationale, replan_reason, action.
 Allowed action types: click, double_click, right_click, drag, scroll, type_text, hotkey, wait, assert, noop.
 If no action is needed, set done=true and action=null.
+The rationale field must be concise Simplified Chinese.
 
 Task:
 {task.instruction}
@@ -182,6 +191,7 @@ Recent actions:
         return f"""
 You are validating whether a GUI testing assertion passed.
 Return strict JSON with keys: passed, confidence, summary.
+The summary field must be concise Simplified Chinese.
 
 Task:
 {task.instruction}
@@ -204,4 +214,3 @@ Recent actions:
 
 
 from pathlib import Path
-

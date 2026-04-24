@@ -7,7 +7,14 @@ from cua_lark.models import ActionStep
 
 
 class MockDesktopExecutor(DesktopExecutor):
+    backend_name = "mock_executor"
+
     def __init__(self) -> None:
+        self.fallback_reason: str | None = None
+        self._state: dict[str, Any] = {}
+        self.reset()
+
+    def reset(self) -> None:
         self._state: dict[str, Any] = {
             "visible_texts": [],
             "typed_texts": [],
@@ -62,4 +69,3 @@ class MockDesktopExecutor(DesktopExecutor):
     def _add_visible_text(self, value: str) -> None:
         if value and value not in self._state["visible_texts"]:
             self._state["visible_texts"].append(value)
-

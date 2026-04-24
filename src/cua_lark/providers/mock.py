@@ -17,6 +17,12 @@ from cua_lark.providers.base import VisionPolicy
 
 
 class MockVisionPolicy(VisionPolicy):
+    backend_name = "mock_policy"
+
+    def __init__(self, fallback_reason: str | None = None) -> None:
+        self.fallback_reason = fallback_reason
+        self.last_transport: str | None = None
+
     def plan_next_action(
         self,
         task: TaskSpec,
@@ -24,15 +30,16 @@ class MockVisionPolicy(VisionPolicy):
         history: Sequence[StepRecord],
         remaining_steps: int,
     ) -> PolicyDecision:
+        self.last_transport = "mock"
         if history:
             return PolicyDecision(
                 done=True,
-                rationale="Mock policy reached a safe stop because no scripted actions remain.",
+                rationale="Mock 策略检测到预置脚本动作已执行完毕，安全结束当前任务。",
             )
 
         return PolicyDecision(
             done=False,
-            rationale="Mock policy inserted a wait action because no external model is configured.",
+            rationale="当前未配置外部模型，Mock 策略插入一个等待动作以模拟规划流程。",
             action=ActionStep(
                 action_type="wait",
                 description="等待界面稳定",
@@ -48,6 +55,7 @@ class MockVisionPolicy(VisionPolicy):
         assertion: AssertionSpec,
         history: Sequence[StepRecord],
     ) -> ValidationResult:
+        self.last_transport = "mock"
         haystack_parts = [observation.flattened_text]
         haystack_parts.extend(record.action.text or "" for record in history if record.action.text)
         haystack_parts.extend(
@@ -60,17 +68,17 @@ class MockVisionPolicy(VisionPolicy):
         if assertion.type == "vlm_semantic":
             passed = self._semantic_match(expected, haystack, task, history)
             summary = (
-                f"Mock semantic validation accepted assertion: {expected}"
+                f"Mock 语义校验通过：{expected}"
                 if passed
-                else f"Mock semantic validation could not justify assertion: {expected}"
+                else f"Mock 语义校验未通过：{expected}"
             )
             confidence = 0.45 if passed else 0.15
         else:
             passed = True if not expected else expected in haystack
             summary = (
-                f"Mock validation matched expected text: {expected}"
+                f"Mock 文本校验命中目标：{expected}"
                 if passed
-                else f"Mock validation could not find expected text: {expected}"
+                else f"Mock 文本校验未找到目标：{expected}"
             )
             confidence = 0.35 if passed else 0.1
         return ValidationResult(

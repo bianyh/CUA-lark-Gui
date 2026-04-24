@@ -47,6 +47,8 @@ class Settings:
     mock_mode: bool = False
     ocr_backend: str = "paddleocr"
     paddleocr_lang: str = "ch"
+    runtime_logs: bool = True
+    runtime_preview_chars: int = 80
 
     @classmethod
     def from_env(cls, repo_root: Path | None = None) -> "Settings":
@@ -67,6 +69,8 @@ class Settings:
             mock_mode=_parse_bool(os.getenv("CUA_MOCK_MODE"), False),
             ocr_backend=os.getenv("CUA_OCR_BACKEND", "paddleocr"),
             paddleocr_lang=os.getenv("CUA_PADDLE_OCR_LANG", "ch"),
+            runtime_logs=_parse_bool(os.getenv("CUA_RUNTIME_LOGS"), True),
+            runtime_preview_chars=_parse_int(os.getenv("CUA_RUNTIME_PREVIEW_CHARS"), 80),
         )
 
     def ensure_runtime_dirs(self) -> None:

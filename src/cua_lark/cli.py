@@ -7,6 +7,7 @@ from pathlib import Path
 from cua_lark.cases.loader import discover_case_files, load_case_directory, load_task_spec
 from cua_lark.config import Settings
 from cua_lark.perception.ocr import paddleocr_diagnostics
+from cua_lark.runtime import RuntimeConsole
 from cua_lark.runner import build_default_runner
 
 
@@ -67,15 +68,19 @@ def _doctor(settings: Settings, as_json: bool) -> int:
     if as_json:
         print(json.dumps(diagnostics, ensure_ascii=False, indent=2))
     else:
+        runtime_console = RuntimeConsole(enabled=True, preview_chars=settings.runtime_preview_chars)
+        runtime_console.doctor_summary(diagnostics)
+        print("")
         for key, value in diagnostics.items():
             print(f"{key}: {value}")
     return 0
 
 
 def _list_cases(case_dir: Path) -> int:
+    print(f"已发现以下测试用例，目录：{case_dir}")
     for path in discover_case_files(case_dir):
         task = load_task_spec(path)
-        print(f"{task.id}\t{task.product}\t{path}")
+        print(f"- {task.id} | 产品={task.product} | 路径={path}")
     return 0
 
 
@@ -83,7 +88,10 @@ def _run_case(settings: Settings, case_path: Path) -> int:
     task = load_task_spec(case_path)
     runner = build_default_runner(settings)
     report = runner.run_task(task)
-    print(f"task={report.task_id} status={report.status} report={report.output_dir / 'report.md'}")
+    print(
+        f"用例执行结束：task={report.task_id} status={report.status} "
+        f"report={report.output_dir / 'report.md'}"
+    )
     return 0 if report.status == "success" else 1
 
 
@@ -91,11 +99,13 @@ def _run_suite(settings: Settings, case_dir: Path) -> int:
     runner = build_default_runner(settings)
     cases = load_case_directory(case_dir)
     if not cases:
-        print(f"No cases found in {case_dir}")
+        print(f"未在 {case_dir} 中发现测试用例")
         return 1
+    runner.runtime_console.suite_start(len(cases), str(case_dir))
     failed = 0
     for task in cases:
         report = runner.run_task(task)
-        print(f"task={report.task_id} status={report.status}")
+        print(f"套件进度：task={report.task_id} status={report.status}")
         failed += 0 if report.status == "success" else 1
+    runner.runtime_console.suite_end(len(cases), failed)
     return 0 if failed == 0 else 1

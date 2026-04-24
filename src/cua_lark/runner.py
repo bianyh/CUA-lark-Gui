@@ -15,6 +15,7 @@ from cua_lark.providers.base import VisionPolicy
 from cua_lark.providers.mock import MockVisionPolicy
 from cua_lark.providers.openai_compatible import OpenAICompatibleVisionPolicy
 from cua_lark.reporter import ReportWriter
+from cua_lark.runtime import RuntimeConsole
 from cua_lark.validators.engine import CompositeValidator
 
 
@@ -28,6 +29,7 @@ class AgentRunner:
         ocr_provider: OCRProvider,
         validator: CompositeValidator,
         reporter: ReportWriter,
+        runtime_console: RuntimeConsole,
     ) -> None:
         self.settings = settings
         self.planner = planner
@@ -36,9 +38,11 @@ class AgentRunner:
         self.ocr_provider = ocr_provider
         self.validator = validator
         self.reporter = reporter
+        self.runtime_console = runtime_console
 
     def run_task(self, task: TaskSpec) -> RunReport:
         self.settings.ensure_runtime_dirs()
+        self.executor.reset()
         started_at = datetime.now(UTC)
         run_id = started_at.strftime("%Y%m%d-%H%M%S")
         artifact_dir = self.settings.artifact_root / task.id / run_id
@@ -48,7 +52,15 @@ class AgentRunner:
         report_dir.mkdir(parents=True, exist_ok=True)
 
         window_keyword = str(task.metadata.get("window_title_keyword", self.settings.window_title_keyword))
-        self.executor.focus_window(window_keyword)
+        focus_result = self.executor.focus_window(window_keyword)
+        self.runtime_console.task_start(
+            task=task,
+            settings=self.settings,
+            policy=self.planner.policy,
+            executor=self.executor,
+            ocr_provider=self.ocr_provider,
+            focus_result=focus_result,
+        )
 
         step_records: list[StepRecord] = []
         scripted_index = 0
@@ -62,6 +74,7 @@ class AgentRunner:
                 overlay_prefix=f"Before step {step_index}",
             )
             last_observation = before
+            self.runtime_console.observation(step_index=step_index, observation=before)
             planning = self.planner.next_action(
                 task=task,
                 observation=before,
@@ -70,6 +83,14 @@ class AgentRunner:
                 remaining_steps=self.settings.max_steps - step_index,
             )
             decision = planning.decision
+            source_label = "脚本动作" if planning.scripted else "模型决策"
+            self.runtime_console.planning(
+                step_index=step_index,
+                decision=decision,
+                source_label=source_label,
+                action=decision.action,
+                policy=self.planner.policy,
+            )
             if decision.done or decision.action is None:
                 break
 
@@ -77,7 +98,14 @@ class AgentRunner:
                 scripted_index += 1
 
             step_succeeded = False
-            for attempt in range(1, self.settings.max_retries + 2):
+            max_attempts = self.settings.max_retries + 1
+            for attempt in range(1, max_attempts + 1):
+                self.runtime_console.execution_start(
+                    step_index=step_index,
+                    attempt=attempt,
+                    max_attempts=max_attempts,
+                    action=decision.action,
+                )
                 step_started_at = datetime.now(UTC)
                 execution_meta: dict[str, object] = {}
                 error_message: str | None = None
@@ -110,6 +138,13 @@ class AgentRunner:
                     )
                     replan_reason = self._classify_failure(None, validation)
                     success = validation.passed
+                self.runtime_console.execution_result(
+                    step_index=step_index,
+                    attempt=attempt,
+                    success=success,
+                    validation=validation,
+                    error_message=error_message,
+                )
 
                 step_records.append(
                     StepRecord(
@@ -134,6 +169,15 @@ class AgentRunner:
                     step_succeeded = True
                     break
 
+                should_retry = attempt < max_attempts
+                self.runtime_console.retry(
+                    step_index=step_index,
+                    attempt=attempt,
+                    max_attempts=max_attempts,
+                    reason=error_message or validation.summary,
+                    will_retry=should_retry,
+                )
+
                 if planning.scripted and attempt > self.settings.max_retries:
                     failure_reason = error_message or validation.summary
                     break
@@ -150,6 +194,7 @@ class AgentRunner:
             overlay_prefix="Final observation",
         )
         final_validation = self.validator.validate_task(task, final_observation, step_records)
+        self.runtime_console.final_validation(final_validation)
         ended_at = datetime.now(UTC)
         duration_seconds = (ended_at - started_at).total_seconds()
         status = "success" if final_validation.passed and failure_reason is None else "failed"
@@ -181,9 +226,13 @@ class AgentRunner:
                 "mock_mode": self.settings.mock_mode,
                 "window_title_keyword": window_keyword,
                 "provider_mode": self.settings.provider_mode,
+                "planner_backend": getattr(self.planner.policy, "backend_name", self.planner.policy.__class__.__name__),
+                "executor_backend": getattr(self.executor, "backend_name", self.executor.__class__.__name__),
+                "ocr_backend": getattr(self.ocr_provider, "backend_name", self.ocr_provider.__class__.__name__),
             },
         )
-        self.reporter.write(report)
+        report_paths = self.reporter.write(report)
+        self.runtime_console.task_end(report, report_paths)
         return report
 
     def _observe(self, screenshot_path: Path, window_title: str, overlay_prefix: str) -> Observation:
@@ -234,16 +283,17 @@ def build_default_runner(settings: Settings) -> AgentRunner:
     if settings.mock_mode:
         policy = MockVisionPolicy()
         executor: DesktopExecutor = MockDesktopExecutor()
-        ocr_provider: OCRProvider = NullOCRProvider()
+        ocr_provider: OCRProvider = NullOCRProvider("当前为 Mock 模式，未启用 OCR。")
     else:
         try:
             policy = OpenAICompatibleVisionPolicy(settings)
-        except Exception:
-            policy = MockVisionPolicy()
+        except Exception as exc:
+            policy = MockVisionPolicy(fallback_reason=f"模型策略初始化失败，已切换到 Mock。原因：{exc}")
         try:
             executor = WindowsDesktopExecutor()
-        except Exception:
+        except Exception as exc:
             executor = MockDesktopExecutor()
+            executor.fallback_reason = f"桌面执行器初始化失败，已切换到 Mock。原因：{exc}"
         if settings.ocr_backend == "none":
             ocr_provider = NullOCRProvider("OCR backend disabled by configuration.")
         else:
@@ -260,6 +310,10 @@ def build_default_runner(settings: Settings) -> AgentRunner:
     screenshotter = Screenshotter(mock_mode=settings.mock_mode or isinstance(executor, MockDesktopExecutor))
     validator = CompositeValidator(vision_policy=policy)
     reporter = ReportWriter()
+    runtime_console = RuntimeConsole(
+        enabled=settings.runtime_logs,
+        preview_chars=settings.runtime_preview_chars,
+    )
     return AgentRunner(
         settings=settings,
         planner=planner,
@@ -268,4 +322,5 @@ def build_default_runner(settings: Settings) -> AgentRunner:
         ocr_provider=ocr_provider,
         validator=validator,
         reporter=reporter,
+        runtime_console=runtime_console,
     )

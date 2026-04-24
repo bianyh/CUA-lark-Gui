@@ -8,6 +8,8 @@ from cua_lark.models import ActionStep
 
 
 class WindowsDesktopExecutor(DesktopExecutor):
+    backend_name = "windows_executor"
+
     def __init__(self) -> None:
         try:
             import pyautogui  # type: ignore
@@ -83,4 +85,3 @@ class WindowsDesktopExecutor(DesktopExecutor):
         if isinstance(coords, (list, tuple)) and len(coords) == 2:
             return (int(coords[0]), int(coords[1]))
         return None
-

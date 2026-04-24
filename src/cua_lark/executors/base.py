@@ -7,6 +7,8 @@ from cua_lark.models import ActionStep
 
 
 class DesktopExecutor(ABC):
+    backend_name = "executor"
+
     @abstractmethod
     def execute(self, step: ActionStep) -> dict[str, Any]:
         raise NotImplementedError
@@ -17,3 +19,5 @@ class DesktopExecutor(ABC):
     def snapshot_state(self) -> dict[str, Any]:
         return {}
 
+    def reset(self) -> None:
+        return None
