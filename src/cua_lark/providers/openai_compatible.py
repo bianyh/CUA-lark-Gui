@@ -135,7 +135,15 @@ class OpenAICompatibleVisionPolicy(VisionPolicy):
         )
 
     def _call_model(self, prompt: str, screenshot_paths: Sequence[str], detail: str) -> str:
-        image_urls = [encode_image_as_data_url(Path(path)) for path in screenshot_paths]
+        max_side = self._settings.api_multi_image_max_side if len(screenshot_paths) > 1 else self._settings.api_image_max_side
+        image_urls = [
+            encode_image_as_data_url(
+                Path(path),
+                max_side=max_side,
+                jpeg_quality=self._settings.api_image_jpeg_quality,
+            )
+            for path in screenshot_paths
+        ]
 
         try:
             content = [{"type": "input_text", "text": prompt}]
@@ -160,19 +168,29 @@ class OpenAICompatibleVisionPolicy(VisionPolicy):
 
         content = [{"type": "text", "text": prompt}]
         content.extend({"type": "image_url", "image_url": {"url": image_url, "detail": detail}} for image_url in image_urls)
-        completion = self._client.chat.completions.create(
-            model=self._settings.openai_model,
-            response_format={"type": "json_object"},
-            messages=[
-                {"role": "system", "content": "You are a GUI planning and validation assistant. Return JSON only."},
-                {
-                    "role": "user",
-                    "content": content,
-                },
-            ],
-        )
-        self.last_transport = "chat.completions"
-        return completion.choices[0].message.content or "{}"
+        try:
+            completion = self._client.chat.completions.create(
+                model=self._settings.openai_model,
+                response_format={"type": "json_object"},
+                messages=[
+                    {"role": "system", "content": "You are a GUI planning and validation assistant. Return JSON only."},
+                    {
+                        "role": "user",
+                        "content": content,
+                    },
+                ],
+            )
+            self.last_transport = "chat.completions"
+            self.last_error = None
+            return completion.choices[0].message.content or "{}"
+        except Exception as exc:
+            self.last_transport = "chat.completions_failed"
+            self.last_error = str(exc)
+            if "413" in str(exc) or "Request Entity Too Large" in str(exc):
+                raise RuntimeError(
+                    "多模态请求体过大，截图上传超过接口限制。已尝试压缩图片，但当前请求仍然过大。"
+                ) from exc
+            raise
 
     def _extract_json(self, raw: str) -> dict:
         try:

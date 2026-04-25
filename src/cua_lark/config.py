@@ -53,6 +53,9 @@ class Settings:
     load_max_wait_rounds: int = 4
     load_poll_interval_ms: int = 700
     load_similarity_threshold: float = 0.992
+    api_image_max_side: int = 1280
+    api_multi_image_max_side: int = 960
+    api_image_jpeg_quality: int = 75
 
     @classmethod
     def from_env(cls, repo_root: Path | None = None) -> "Settings":
@@ -79,6 +82,9 @@ class Settings:
             load_max_wait_rounds=_parse_int(os.getenv("CUA_LOAD_MAX_WAIT_ROUNDS"), 4),
             load_poll_interval_ms=_parse_int(os.getenv("CUA_LOAD_POLL_INTERVAL_MS"), 700),
             load_similarity_threshold=float(os.getenv("CUA_LOAD_SIMILARITY_THRESHOLD", "0.992")),
+            api_image_max_side=_parse_int(os.getenv("CUA_API_IMAGE_MAX_SIDE"), 1280),
+            api_multi_image_max_side=_parse_int(os.getenv("CUA_API_MULTI_IMAGE_MAX_SIDE"), 960),
+            api_image_jpeg_quality=_parse_int(os.getenv("CUA_API_IMAGE_JPEG_QUALITY"), 75),
         )
 
     def ensure_runtime_dirs(self) -> None:

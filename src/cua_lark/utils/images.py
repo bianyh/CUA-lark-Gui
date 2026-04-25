@@ -7,10 +7,28 @@ from pathlib import Path
 from PIL import Image, ImageChops, ImageStat
 
 
-def encode_image_as_data_url(path: Path) -> str:
-    suffix = path.suffix.lower().lstrip(".") or "png"
-    payload = base64.b64encode(path.read_bytes()).decode("utf-8")
-    return f"data:image/{suffix};base64,{payload}"
+def encode_image_as_data_url(
+    path: Path,
+    *,
+    max_side: int | None = None,
+    jpeg_quality: int = 75,
+) -> str:
+    image = Image.open(path)
+    image.load()
+    image = image.convert("RGB")
+
+    if max_side and max(image.size) > max_side:
+        ratio = max_side / float(max(image.size))
+        resized = (
+            max(1, int(image.size[0] * ratio)),
+            max(1, int(image.size[1] * ratio)),
+        )
+        image = image.resize(resized)
+
+    buffer = BytesIO()
+    image.save(buffer, format="JPEG", quality=jpeg_quality, optimize=True)
+    payload = base64.b64encode(buffer.getvalue()).decode("utf-8")
+    return f"data:image/jpeg;base64,{payload}"
 
 
 def compare_images(path_a: Path, path_b: Path) -> dict[str, float]:
@@ -26,4 +44,3 @@ def compare_images(path_a: Path, path_b: Path) -> dict[str, float]:
         "difference": normalized,
         "similarity": max(0.0, 1.0 - normalized),
     }
-
