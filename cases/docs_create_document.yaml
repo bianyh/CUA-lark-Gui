@@ -1,0 +1,24 @@
+id: docs_create_document
+name: Docs create project weekly document
+product: Docs
+instruction: Create a new Feishu document named 项目周报 and enter the title 2026年Q2项目进展.
+preconditions:
+  - Feishu desktop is installed and logged in with a test account.
+  - The account has permission to create documents in the selected workspace.
+test_data:
+  document_name: 项目周报
+  title: 2026年Q2项目进展
+expected_result: A Feishu document is open and its title or first heading contains 2026年Q2项目进展.
+risk_level: low
+timeout_seconds: 240
+steps:
+  - step_id: "1"
+    goal: Navigate to Feishu Docs and create a new blank document.
+    success_criteria: A blank editable document page is visible.
+    allowed_actions: [click, hotkey, type_text, wait, scroll, screenshot]
+    max_retries: 2
+  - step_id: "2"
+    goal: Enter the document title 2026年Q2项目进展.
+    success_criteria: The title 2026年Q2项目进展 is visible in the document.
+    allowed_actions: [click, type_text, hotkey, wait, screenshot]
+    max_retries: 2

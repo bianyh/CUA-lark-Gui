@@ -1,0 +1,26 @@
+id: im_send_text
+name: IM send unique text message
+product: IM
+instruction: Search for the Feishu test group and send a unique text message, then confirm it appears in the chat.
+preconditions:
+  - Feishu desktop is installed and logged in with a test account.
+  - A safe test group exists and is named in test_data.group_name.
+test_data:
+  group_name: 测试群
+  message: Hello World from CUA-Lark ${run_id}
+expected_result: The target test group chat is open and the unique message is visible as the latest sent message.
+risk_level: low
+timeout_seconds: 180
+steps:
+  - step_id: "1"
+    goal: Open Feishu IM search and locate the test group named 测试群.
+    success_criteria: The chat for 测试群 is open.
+    allowed_actions: [hotkey, click, type_text, wait, screenshot]
+    max_retries: 2
+    requires_confirmation: false
+  - step_id: "2"
+    goal: Send the text message "Hello World from CUA-Lark ${run_id}" in the current chat input box.
+    success_criteria: The message has been sent and appears in the conversation.
+    allowed_actions: [click, type_text, hotkey, wait, screenshot]
+    max_retries: 2
+    requires_confirmation: false

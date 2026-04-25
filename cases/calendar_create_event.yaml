@@ -1,0 +1,25 @@
+id: calendar_create_event
+name: Calendar create tomorrow meeting
+product: Calendar
+instruction: Create a meeting tomorrow afternoon at 2 PM and invite the test attendee.
+preconditions:
+  - Feishu desktop is installed and logged in with a test account.
+  - A safe test attendee exists and is named in test_data.attendee.
+test_data:
+  title: CUA-Lark 自动化测试会议
+  attendee: 张三
+  time: tomorrow 14:00 local time
+expected_result: The calendar contains a meeting titled CUA-Lark 自动化测试会议 at tomorrow 14:00 with the test attendee.
+risk_level: low
+timeout_seconds: 240
+steps:
+  - step_id: "1"
+    goal: Open Feishu Calendar and create a new event for tomorrow at 14:00.
+    success_criteria: The event editor is open with the target date and time selected.
+    allowed_actions: [click, type_text, hotkey, wait, scroll, screenshot]
+    max_retries: 2
+  - step_id: "2"
+    goal: Fill the title CUA-Lark 自动化测试会议 and invite 张三, then save the event.
+    success_criteria: The new event appears on the calendar at tomorrow 14:00.
+    allowed_actions: [click, type_text, hotkey, wait, screenshot]
+    max_retries: 2
