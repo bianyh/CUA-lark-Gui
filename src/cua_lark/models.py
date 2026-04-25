@@ -16,6 +16,13 @@ class ReplanReason(str, Enum):
     UNKNOWN = "unknown"
 
 
+class UIReadiness(str, Enum):
+    READY = "ready"
+    LOADING = "loading"
+    TIMEOUT = "timeout"
+    UNKNOWN = "unknown"
+
+
 @dataclass(slots=True)
 class BoundingBox:
     x: int
@@ -45,6 +52,18 @@ class OCRBlock:
 
 
 @dataclass(slots=True)
+class StateAssessment:
+    readiness: UIReadiness
+    state_label: str
+    summary: str
+    matched_signals: list[str] = field(default_factory=list)
+    confidence: float = 0.0
+    stable_rounds: int = 0
+    screenshot_similarity: float | None = None
+    timed_out: bool = False
+
+
+@dataclass(slots=True)
 class ActionTarget:
     label: str
     bbox: BoundingBox | None = None
@@ -71,11 +90,16 @@ class Observation:
     ocr_blocks: list[OCRBlock] = field(default_factory=list)
     notes: list[str] = field(default_factory=list)
     ui_hints: dict[str, Any] = field(default_factory=dict)
+    state_assessment: StateAssessment | None = None
 
     @property
     def flattened_text(self) -> str:
         parts = [block.text for block in self.ocr_blocks if block.text.strip()]
         parts.extend(note for note in self.notes if note.strip())
+        if self.state_assessment is not None:
+            parts.append(self.state_assessment.state_label)
+            parts.append(self.state_assessment.summary)
+            parts.extend(self.state_assessment.matched_signals)
         for value in self.ui_hints.values():
             if isinstance(value, str):
                 parts.append(value)
@@ -225,6 +249,7 @@ class StepRecord:
     observation_before: Observation
     observation_after: Observation
     validation: ValidationResult | None = None
+    state_assessment: StateAssessment | None = None
     error: str | None = None
     replan_reason: ReplanReason | None = None
     executor_state: dict[str, Any] = field(default_factory=dict)

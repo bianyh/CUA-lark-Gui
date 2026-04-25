@@ -100,6 +100,24 @@ class RuntimeConsole:
             f"第 {attempt} 次尝试{status_text}，策略=`{validation.strategy}`，摘要={self._trim(validation.summary)}",
         )
 
+    def loading_wait(self, step_index: int, wait_round: int, summary: str) -> None:
+        self._emit(
+            f"加载 {step_index}",
+            f"第 {wait_round} 轮等待界面稳定，原因：{self._trim(summary)}",
+        )
+
+    def state_probe(self, step_index: int, wait_round: int, summary: str) -> None:
+        self._emit(
+            f"探测 {step_index}",
+            f"第 {wait_round} 轮状态探测结果：{self._trim(summary)}",
+        )
+
+    def state_summary(self, step_index: int, summary: str) -> None:
+        self._emit(
+            f"状态 {step_index}",
+            self._trim(summary),
+        )
+
     def retry(self, step_index: int, attempt: int, max_attempts: int, reason: str, will_retry: bool) -> None:
         if will_retry:
             self._emit(

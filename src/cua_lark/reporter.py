@@ -43,6 +43,8 @@ class ReportWriter:
                 f"- Step {record.index} attempt {record.attempt}: `{record.action.action_type}` "
                 f"{record.action.description} -> `{record.success}`"
             )
+            if record.state_assessment:
+                lines.append(f"  state: {record.state_assessment.summary}")
             if record.validation:
                 lines.append(f"  validation: {record.validation.summary}")
             if record.error:
@@ -61,4 +63,3 @@ class ReportWriter:
             )
 
         return "\n".join(lines) + "\n"
-

@@ -49,6 +49,10 @@ class Settings:
     paddleocr_lang: str = "ch"
     runtime_logs: bool = True
     runtime_preview_chars: int = 80
+    load_wait_enabled: bool = True
+    load_max_wait_rounds: int = 4
+    load_poll_interval_ms: int = 700
+    load_similarity_threshold: float = 0.992
 
     @classmethod
     def from_env(cls, repo_root: Path | None = None) -> "Settings":
@@ -71,6 +75,10 @@ class Settings:
             paddleocr_lang=os.getenv("CUA_PADDLE_OCR_LANG", "ch"),
             runtime_logs=_parse_bool(os.getenv("CUA_RUNTIME_LOGS"), True),
             runtime_preview_chars=_parse_int(os.getenv("CUA_RUNTIME_PREVIEW_CHARS"), 80),
+            load_wait_enabled=_parse_bool(os.getenv("CUA_LOAD_WAIT_ENABLED"), True),
+            load_max_wait_rounds=_parse_int(os.getenv("CUA_LOAD_MAX_WAIT_ROUNDS"), 4),
+            load_poll_interval_ms=_parse_int(os.getenv("CUA_LOAD_POLL_INTERVAL_MS"), 700),
+            load_similarity_threshold=float(os.getenv("CUA_LOAD_SIMILARITY_THRESHOLD", "0.992")),
         )
 
     def ensure_runtime_dirs(self) -> None:

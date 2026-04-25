@@ -1,13 +1,15 @@
 from __future__ import annotations
 
+from datetime import UTC, datetime
 import unittest
 from pathlib import Path
 import shutil
 from cua_lark.cases.loader import discover_case_files, load_task_spec
 from cua_lark.config import Settings
-from cua_lark.models import AssertionSpec, TaskSpec
+from cua_lark.models import AssertionSpec, Observation, TaskSpec, UIReadiness
 from cua_lark.perception.ocr import paddleocr_diagnostics
 from cua_lark.perception.screenshot import Screenshotter
+from cua_lark.perception.state import StateAnalyzer
 from cua_lark.runner import build_default_runner
 
 
@@ -26,6 +28,20 @@ class CaseLoaderTest(unittest.TestCase):
         self.assertIn("package_version", diagnostics)
         self.assertIn("importable", diagnostics)
         self.assertIn("error", diagnostics)
+
+    def test_state_analyzer_detects_loading(self) -> None:
+        analyzer = StateAnalyzer()
+        task = TaskSpec(id="loading_case", product="im", instruction="等待加载完成")
+        observation = Observation(
+            screenshot_path="fake.png",
+            timestamp=datetime.now(UTC),
+            window_title="飞书",
+            screen_size=(100, 100),
+            notes=["当前页面正在加载中，请稍候"],
+        )
+        assessment = analyzer.assess(task, observation)
+        self.assertEqual(assessment.readiness, UIReadiness.LOADING)
+        self.assertIn("加载判断=加载中", assessment.summary)
 
 
 class MockRunnerTest(unittest.TestCase):
@@ -93,6 +109,8 @@ class MockRunnerTest(unittest.TestCase):
             self.assertTrue((report.output_dir / "run.json").exists())
             self.assertTrue((report.output_dir / "report.md").exists())
             self.assertTrue((report.artifact_dir / "timeline").exists())
+            self.assertGreaterEqual(report.metrics["load_wait_rounds"], 0)
+            self.assertIsNotNone(report.step_records[-1].state_assessment)
         finally:
             if root.exists():
                 shutil.rmtree(root)

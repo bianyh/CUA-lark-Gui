@@ -2,20 +2,23 @@ from __future__ import annotations
 
 from datetime import UTC, datetime
 from pathlib import Path
+import time
 
 from cua_lark.config import Settings
 from cua_lark.executors.base import DesktopExecutor
 from cua_lark.executors.mock import MockDesktopExecutor
 from cua_lark.executors.windows import WindowsDesktopExecutor
-from cua_lark.models import Observation, ReplanReason, RunReport, StepRecord, TaskSpec, ValidationResult
+from cua_lark.models import Observation, ReplanReason, RunReport, StepRecord, TaskSpec, UIReadiness, ValidationResult
 from cua_lark.perception.ocr import NullOCRProvider, OCRProvider, PaddleOCRProvider, paddleocr_diagnostics
 from cua_lark.perception.screenshot import Screenshotter
+from cua_lark.perception.state import StateAnalyzer
 from cua_lark.planning.hybrid import HybridPlanner
 from cua_lark.providers.base import VisionPolicy
 from cua_lark.providers.mock import MockVisionPolicy
 from cua_lark.providers.openai_compatible import OpenAICompatibleVisionPolicy
 from cua_lark.reporter import ReportWriter
 from cua_lark.runtime import RuntimeConsole
+from cua_lark.utils.images import compare_images
 from cua_lark.validators.engine import CompositeValidator
 
 
@@ -30,6 +33,7 @@ class AgentRunner:
         validator: CompositeValidator,
         reporter: ReportWriter,
         runtime_console: RuntimeConsole,
+        state_analyzer: StateAnalyzer,
     ) -> None:
         self.settings = settings
         self.planner = planner
@@ -39,6 +43,7 @@ class AgentRunner:
         self.validator = validator
         self.reporter = reporter
         self.runtime_console = runtime_console
+        self.state_analyzer = state_analyzer
 
     def run_task(self, task: TaskSpec) -> RunReport:
         self.settings.ensure_runtime_dirs()
@@ -65,14 +70,25 @@ class AgentRunner:
         step_records: list[StepRecord] = []
         scripted_index = 0
         failure_reason: str | None = None
-        last_observation: Observation | None = None
+        current_observation = self._observe(
+            screenshot_path=timeline_dir / "00_initial.png",
+            window_title=window_keyword,
+            overlay_prefix="Initial observation",
+        )
+        current_observation, _ = self._assess_and_wait_until_ready(
+            task=task,
+            observation=current_observation,
+            action=None,
+            history=step_records,
+            timeline_dir=timeline_dir,
+            step_index=0,
+            attempt=0,
+            window_title=window_keyword,
+        )
+        last_observation: Observation | None = current_observation
 
         for step_index in range(1, self.settings.max_steps + 1):
-            before = self._observe(
-                screenshot_path=timeline_dir / f"{step_index:02d}_before.png",
-                window_title=window_keyword,
-                overlay_prefix=f"Before step {step_index}",
-            )
+            before = current_observation
             last_observation = before
             self.runtime_console.observation(step_index=step_index, observation=before)
             planning = self.planner.next_action(
@@ -114,21 +130,40 @@ class AgentRunner:
                 except Exception as exc:
                     error_message = str(exc)
 
-                after = self._observe(
+                raw_after = self._observe(
                     screenshot_path=timeline_dir / f"{step_index:02d}_attempt{attempt}_after.png",
                     window_title=window_keyword,
                     overlay_prefix=f"After step {step_index} attempt {attempt}",
+                )
+                after, state_meta = self._assess_and_wait_until_ready(
+                    task=task,
+                    observation=raw_after,
+                    action=decision.action,
+                    history=step_records,
+                    timeline_dir=timeline_dir,
+                    step_index=step_index,
+                    attempt=attempt,
+                    window_title=window_keyword,
                 )
                 last_observation = after
 
                 if error_message:
                     validation = ValidationResult(
                         passed=False,
-                        summary=f"Execution failed before validation: {error_message}",
+                        summary=f"动作执行异常，未进入正常校验：{error_message}",
                         strategy="execution_error",
                         confidence=0.0,
                     )
                     replan_reason = self._classify_failure(error_message, validation)
+                    success = False
+                elif after.state_assessment is not None and after.state_assessment.readiness == UIReadiness.TIMEOUT:
+                    validation = ValidationResult(
+                        passed=False,
+                        summary=f"界面等待加载超时：{after.state_assessment.summary}",
+                        strategy="load_wait",
+                        confidence=0.0,
+                    )
+                    replan_reason = ReplanReason.LOAD_TIMEOUT
                     success = False
                 else:
                     validation = self.validator.validate_hint(
@@ -158,15 +193,17 @@ class AgentRunner:
                         observation_before=before,
                         observation_after=after,
                         validation=validation,
+                        state_assessment=after.state_assessment,
                         error=error_message,
                         replan_reason=None if success else replan_reason,
                         executor_state=self.executor.snapshot_state(),
-                        execution_meta=dict(execution_meta),
+                        execution_meta={**dict(execution_meta), **state_meta},
                     )
                 )
 
                 if success:
                     step_succeeded = True
+                    current_observation = after
                     break
 
                 should_retry = attempt < max_attempts
@@ -205,6 +242,12 @@ class AgentRunner:
             "successful_steps": sum(1 for record in step_records if record.success),
             "failed_steps": sum(1 for record in step_records if not record.success),
             "retries": sum(max(0, record.attempt - 1) for record in step_records),
+            "load_wait_rounds": sum(
+                int(record.execution_meta.get("load_wait_rounds", 0)) for record in step_records
+            ),
+            "load_timeouts": sum(
+                1 for record in step_records if bool(record.execution_meta.get("load_timed_out", False))
+            ),
             "max_steps": self.settings.max_steps,
             "max_retries": self.settings.max_retries,
         }
@@ -260,6 +303,84 @@ class AgentRunner:
             notes=overlay_lines,
             ui_hints=state,
         )
+
+    def _assess_and_wait_until_ready(
+        self,
+        task: TaskSpec,
+        observation: Observation,
+        action,
+        history: list[StepRecord],
+        timeline_dir: Path,
+        step_index: int,
+        attempt: int,
+        window_title: str,
+    ) -> tuple[Observation, dict[str, object]]:
+        assessment = self.state_analyzer.assess(task, observation, action=action, history=history)
+        observation.state_assessment = assessment
+        self.runtime_console.state_summary(step_index, assessment.summary)
+        wait_rounds = 0
+        similarity: float | None = None
+        stable_ready_rounds = 0 if self.state_analyzer.requires_additional_wait(observation, action, assessment) else 1
+
+        if not self.settings.load_wait_enabled:
+            return observation, {"load_wait_rounds": wait_rounds, "load_timed_out": False}
+
+        latest_observation = observation
+        latest_assessment = assessment
+        last_observation = observation
+
+        while wait_rounds < self.settings.load_max_wait_rounds:
+            if latest_assessment.readiness != UIReadiness.LOADING and stable_ready_rounds >= 1:
+                break
+
+            wait_rounds += 1
+            self.runtime_console.loading_wait(step_index, wait_rounds, latest_assessment.summary)
+            time.sleep(self.settings.load_poll_interval_ms / 1000.0)
+
+            polled_observation = self._observe(
+                screenshot_path=timeline_dir / f"{step_index:02d}_attempt{attempt}_settle{wait_rounds}.png",
+                window_title=window_title,
+                overlay_prefix=f"Settle step {step_index} attempt {attempt} round {wait_rounds}",
+            )
+            similarity = compare_images(
+                Path(last_observation.screenshot_path),
+                Path(polled_observation.screenshot_path),
+            )["similarity"]
+            latest_assessment = self.state_analyzer.assess(
+                task,
+                polled_observation,
+                action=action,
+                history=history,
+                stable_rounds=wait_rounds,
+                screenshot_similarity=similarity,
+            )
+            polled_observation.state_assessment = latest_assessment
+            self.runtime_console.state_probe(step_index, wait_rounds, latest_assessment.summary)
+            latest_observation = polled_observation
+            last_observation = polled_observation
+
+            if self.state_analyzer.is_stable(latest_assessment, similarity):
+                stable_ready_rounds += 1
+            else:
+                stable_ready_rounds = 0
+
+        if latest_assessment.readiness == UIReadiness.LOADING and wait_rounds >= self.settings.load_max_wait_rounds:
+            latest_assessment = self.state_analyzer.assess(
+                task,
+                latest_observation,
+                action=action,
+                history=history,
+                stable_rounds=wait_rounds,
+                screenshot_similarity=similarity,
+                timed_out=True,
+            )
+            latest_observation.state_assessment = latest_assessment
+
+        return latest_observation, {
+            "load_wait_rounds": wait_rounds,
+            "load_timed_out": latest_assessment.readiness == UIReadiness.TIMEOUT,
+            "state_summary": latest_assessment.summary,
+        }
 
     def _classify_failure(
         self,
@@ -322,6 +443,7 @@ def build_default_runner(settings: Settings) -> AgentRunner:
         enabled=settings.runtime_logs,
         preview_chars=settings.runtime_preview_chars,
     )
+    state_analyzer = StateAnalyzer(similarity_threshold=settings.load_similarity_threshold)
     return AgentRunner(
         settings=settings,
         planner=planner,
@@ -331,4 +453,5 @@ def build_default_runner(settings: Settings) -> AgentRunner:
         validator=validator,
         reporter=reporter,
         runtime_console=runtime_console,
+        state_analyzer=state_analyzer,
     )
