@@ -238,6 +238,27 @@ class ValidationResult:
 
 
 @dataclass(slots=True)
+class ProgressAssessment:
+    success: bool
+    completion_score: float
+    progress_label: str
+    summary: str
+    evidence: list[str] = field(default_factory=list)
+    unmet_goals: list[str] = field(default_factory=list)
+    confidence: float = 0.0
+
+
+@dataclass(slots=True)
+class ReflectionResult:
+    should_replan: bool
+    root_cause: str
+    failure_stage: str
+    suggested_strategy: str
+    suggested_action: ActionStep | None = None
+    confidence: float = 0.0
+
+
+@dataclass(slots=True)
 class StepRecord:
     index: int
     attempt: int
@@ -250,6 +271,8 @@ class StepRecord:
     observation_after: Observation
     validation: ValidationResult | None = None
     state_assessment: StateAssessment | None = None
+    progress_assessment: ProgressAssessment | None = None
+    reflection: ReflectionResult | None = None
     error: str | None = None
     replan_reason: ReplanReason | None = None
     executor_state: dict[str, Any] = field(default_factory=dict)
@@ -269,5 +292,6 @@ class RunReport:
     step_records: list[StepRecord] = field(default_factory=list)
     metrics: dict[str, Any] = field(default_factory=dict)
     final_validation: ValidationResult | None = None
+    final_progress: ProgressAssessment | None = None
     failure_reason: str | None = None
     assumptions: dict[str, Any] = field(default_factory=dict)

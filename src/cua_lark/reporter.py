@@ -45,6 +45,11 @@ class ReportWriter:
             )
             if record.state_assessment:
                 lines.append(f"  state: {record.state_assessment.summary}")
+            if record.progress_assessment:
+                lines.append(f"  progress: {record.progress_assessment.summary}")
+            if record.reflection:
+                lines.append(f"  reflection: {record.reflection.root_cause}")
+                lines.append(f"  strategy: {record.reflection.suggested_strategy}")
             if record.validation:
                 lines.append(f"  validation: {record.validation.summary}")
             if record.error:
@@ -59,6 +64,19 @@ class ReportWriter:
                     f"- Passed: `{report.final_validation.passed}`",
                     f"- Summary: {report.final_validation.summary}",
                     f"- Strategy: `{report.final_validation.strategy}`",
+                ]
+            )
+
+        if report.final_progress:
+            lines.extend(
+                [
+                    "",
+                    "## Final Progress",
+                    "",
+                    f"- Success: `{report.final_progress.success}`",
+                    f"- Completion Score: `{report.final_progress.completion_score:.2f}`",
+                    f"- Label: {report.final_progress.progress_label}",
+                    f"- Summary: {report.final_progress.summary}",
                 ]
             )
 

@@ -9,6 +9,7 @@ Vision-first GUI testing agent for the Feishu desktop client, built for the Feis
 - Optional Windows desktop automation integrations for screenshot capture, Paddle OCR, and mouse/keyboard control.
 - Structured Feishu test case definitions for IM and Calendar MVP scenarios.
 - A reporting pipeline that emits `run.json`, `report.md`, and a screenshot timeline per run.
+- A progress assessment and reflection loop that estimates completion, identifies failure stages, and suggests safe recovery actions.
 
 ## Tech Decisions
 
@@ -82,6 +83,7 @@ tests/                  Lightweight unit tests for the core loop
 ## Runtime Logs
 
 - The CLI now prints Chinese runtime status messages for observation, planning, execution, validation, retries, and report generation.
+- The runtime also prints progress assessment, reflection output, and recovery actions after each stable step.
 - Control it with `CUA_RUNTIME_LOGS=true|false`.
 - Control preview length with `CUA_RUNTIME_PREVIEW_CHARS=80`.
 - This is useful when you want to watch model decisions, fallback behavior, and workflow progress in real time while testing Feishu.

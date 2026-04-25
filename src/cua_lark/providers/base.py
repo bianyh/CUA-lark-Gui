@@ -3,7 +3,17 @@ from __future__ import annotations
 from abc import ABC, abstractmethod
 from typing import Sequence
 
-from cua_lark.models import AssertionSpec, Observation, PolicyDecision, StepRecord, TaskSpec, ValidationResult
+from cua_lark.models import (
+    ActionStep,
+    AssertionSpec,
+    Observation,
+    PolicyDecision,
+    ProgressAssessment,
+    ReflectionResult,
+    StepRecord,
+    TaskSpec,
+    ValidationResult,
+)
 
 
 class VisionPolicy(ABC):
@@ -27,3 +37,25 @@ class VisionPolicy(ABC):
     ) -> ValidationResult:
         raise NotImplementedError
 
+    @abstractmethod
+    def assess_progress(
+        self,
+        task: TaskSpec,
+        observation: Observation,
+        history: Sequence[StepRecord],
+        latest_action: ActionStep | None = None,
+    ) -> ProgressAssessment:
+        raise NotImplementedError
+
+    @abstractmethod
+    def reflect_after_step(
+        self,
+        task: TaskSpec,
+        before: Observation,
+        after: Observation,
+        action: ActionStep,
+        validation: ValidationResult,
+        progress: ProgressAssessment,
+        history: Sequence[StepRecord],
+    ) -> ReflectionResult:
+        raise NotImplementedError

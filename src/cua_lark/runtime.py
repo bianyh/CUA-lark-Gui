@@ -4,7 +4,16 @@ from datetime import datetime
 from typing import Any
 
 from cua_lark.config import Settings
-from cua_lark.models import ActionStep, Observation, PolicyDecision, RunReport, TaskSpec, ValidationResult
+from cua_lark.models import (
+    ActionStep,
+    Observation,
+    PolicyDecision,
+    ProgressAssessment,
+    ReflectionResult,
+    RunReport,
+    TaskSpec,
+    ValidationResult,
+)
 
 
 class RuntimeConsole:
@@ -100,6 +109,33 @@ class RuntimeConsole:
             f"第 {attempt} 次尝试{status_text}，策略=`{validation.strategy}`，摘要={self._trim(validation.summary)}",
         )
 
+    def progress(self, step_index: int, assessment: ProgressAssessment) -> None:
+        self._emit(
+            f"进度 {step_index}",
+            f"完成度={assessment.completion_score:.2f}，标签={assessment.progress_label}，摘要={self._trim(assessment.summary)}",
+        )
+        if assessment.unmet_goals:
+            self._emit(
+                f"进度 {step_index}",
+                f"未满足目标：{self._trim(' / '.join(assessment.unmet_goals[:3]))}",
+            )
+
+    def reflection(self, step_index: int, reflection: ReflectionResult) -> None:
+        self._emit(
+            f"反思 {step_index}",
+            f"是否重规划={reflection.should_replan}，失败阶段={self._trim(reflection.failure_stage)}，原因={self._trim(reflection.root_cause)}",
+        )
+        self._emit(
+            f"反思 {step_index}",
+            f"建议策略：{self._trim(reflection.suggested_strategy)}",
+        )
+
+    def recovery_action(self, step_index: int, action: ActionStep) -> None:
+        self._emit(
+            f"恢复 {step_index}",
+            f"执行反思建议动作：{self._format_action(action)}",
+        )
+
     def loading_wait(self, step_index: int, wait_round: int, summary: str) -> None:
         self._emit(
             f"加载 {step_index}",
@@ -140,6 +176,12 @@ class RuntimeConsole:
         if isinstance(checks, list):
             for index, check in enumerate(checks[:5], start=1):
                 self._emit("总验", f"断言 {index}: {self._trim(str(check))}")
+
+    def final_progress(self, progress: ProgressAssessment) -> None:
+        self._emit(
+            "总进度",
+            f"完成度={progress.completion_score:.2f}，标签={progress.progress_label}，摘要={self._trim(progress.summary)}",
+        )
 
     def task_end(self, report: RunReport, report_paths: dict[str, Any]) -> None:
         status_text = "成功" if report.status == "success" else "失败"

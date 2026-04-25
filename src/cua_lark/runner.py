@@ -8,7 +8,16 @@ from cua_lark.config import Settings
 from cua_lark.executors.base import DesktopExecutor
 from cua_lark.executors.mock import MockDesktopExecutor
 from cua_lark.executors.windows import WindowsDesktopExecutor
-from cua_lark.models import Observation, ReplanReason, RunReport, StepRecord, TaskSpec, UIReadiness, ValidationResult
+from cua_lark.models import (
+    Observation,
+    ReflectionResult,
+    ReplanReason,
+    RunReport,
+    StepRecord,
+    TaskSpec,
+    UIReadiness,
+    ValidationResult,
+)
 from cua_lark.perception.ocr import NullOCRProvider, OCRProvider, PaddleOCRProvider, paddleocr_diagnostics
 from cua_lark.perception.screenshot import Screenshotter
 from cua_lark.perception.state import StateAnalyzer
@@ -115,7 +124,9 @@ class AgentRunner:
 
             step_succeeded = False
             max_attempts = self.settings.max_retries + 1
+            attempt_before = before
             for attempt in range(1, max_attempts + 1):
+                attempt_observation_before = attempt_before
                 self.runtime_console.execution_start(
                     step_index=step_index,
                     attempt=attempt,
@@ -173,6 +184,27 @@ class AgentRunner:
                     )
                     replan_reason = self._classify_failure(None, validation)
                     success = validation.passed
+
+                progress_assessment = self.planner.policy.assess_progress(
+                    task=task,
+                    observation=after,
+                    history=step_records,
+                    latest_action=decision.action,
+                )
+                self.runtime_console.progress(step_index, progress_assessment)
+
+                reflection: ReflectionResult | None = None
+                if not success:
+                    reflection = self.planner.policy.reflect_after_step(
+                        task=task,
+                        before=attempt_before,
+                        after=after,
+                        action=decision.action,
+                        validation=validation,
+                        progress=progress_assessment,
+                        history=step_records,
+                    )
+                    self.runtime_console.reflection(step_index, reflection)
                 self.runtime_console.execution_result(
                     step_index=step_index,
                     attempt=attempt,
@@ -181,27 +213,28 @@ class AgentRunner:
                     error_message=error_message,
                 )
 
-                step_records.append(
-                    StepRecord(
-                        index=step_index,
-                        attempt=attempt,
-                        action=decision.action,
-                        success=success,
-                        rationale=decision.rationale,
-                        started_at=step_started_at,
-                        ended_at=datetime.now(UTC),
-                        observation_before=before,
-                        observation_after=after,
-                        validation=validation,
-                        state_assessment=after.state_assessment,
-                        error=error_message,
-                        replan_reason=None if success else replan_reason,
-                        executor_state=self.executor.snapshot_state(),
-                        execution_meta={**dict(execution_meta), **state_meta},
-                    )
-                )
-
                 if success:
+                    step_records.append(
+                        StepRecord(
+                            index=step_index,
+                            attempt=attempt,
+                            action=decision.action,
+                            success=success,
+                            rationale=decision.rationale,
+                            started_at=step_started_at,
+                            ended_at=datetime.now(UTC),
+                            observation_before=attempt_observation_before,
+                            observation_after=after,
+                            validation=validation,
+                            state_assessment=after.state_assessment,
+                            progress_assessment=progress_assessment,
+                            reflection=reflection,
+                            error=error_message,
+                            replan_reason=None if success else replan_reason,
+                            executor_state=self.executor.snapshot_state(),
+                            execution_meta={**dict(execution_meta), **state_meta},
+                        )
+                    )
                     step_succeeded = True
                     current_observation = after
                     break
@@ -213,6 +246,43 @@ class AgentRunner:
                     max_attempts=max_attempts,
                     reason=error_message or validation.summary,
                     will_retry=should_retry,
+                )
+
+                attempt_before = after
+                if should_retry and reflection and reflection.should_replan and reflection.suggested_action is not None:
+                    recovery_observation, recovery_meta = self._apply_recovery_action(
+                        step_index=step_index,
+                        attempt=attempt,
+                        action=reflection.suggested_action,
+                        task=task,
+                        history=step_records,
+                        timeline_dir=timeline_dir,
+                        window_title=window_keyword,
+                    )
+                    attempt_before = recovery_observation
+                    last_observation = recovery_observation
+                    execution_meta.update(recovery_meta)
+
+                step_records.append(
+                    StepRecord(
+                        index=step_index,
+                        attempt=attempt,
+                        action=decision.action,
+                        success=success,
+                        rationale=decision.rationale,
+                        started_at=step_started_at,
+                        ended_at=datetime.now(UTC),
+                        observation_before=attempt_observation_before,
+                        observation_after=after,
+                        validation=validation,
+                        state_assessment=after.state_assessment,
+                        progress_assessment=progress_assessment,
+                        reflection=reflection,
+                        error=error_message,
+                        replan_reason=None if success else replan_reason,
+                        executor_state=self.executor.snapshot_state(),
+                        execution_meta={**dict(execution_meta), **state_meta},
+                    )
                 )
 
                 if planning.scripted and attempt > self.settings.max_retries:
@@ -231,6 +301,13 @@ class AgentRunner:
             overlay_prefix="Final observation",
         )
         final_validation = self.validator.validate_task(task, final_observation, step_records)
+        final_progress = self.planner.policy.assess_progress(
+            task=task,
+            observation=final_observation,
+            history=step_records,
+            latest_action=step_records[-1].action if step_records else None,
+        )
+        self.runtime_console.final_progress(final_progress)
         self.runtime_console.final_validation(final_validation)
         ended_at = datetime.now(UTC)
         duration_seconds = (ended_at - started_at).total_seconds()
@@ -264,6 +341,7 @@ class AgentRunner:
             step_records=step_records,
             metrics=metrics,
             final_validation=final_validation,
+            final_progress=final_progress,
             failure_reason=failure_reason if failure_reason else None if final_validation.passed else final_validation.summary,
             assumptions={
                 "mock_mode": self.settings.mock_mode,
@@ -381,6 +459,47 @@ class AgentRunner:
             "load_timed_out": latest_assessment.readiness == UIReadiness.TIMEOUT,
             "state_summary": latest_assessment.summary,
         }
+
+    def _apply_recovery_action(
+        self,
+        step_index: int,
+        attempt: int,
+        action,
+        task: TaskSpec,
+        history: list[StepRecord],
+        timeline_dir: Path,
+        window_title: str,
+    ) -> tuple[Observation, dict[str, object]]:
+        self.runtime_console.recovery_action(step_index, action)
+        recovery_meta: dict[str, object] = {
+            "recovery_action_type": action.action_type,
+            "recovery_action_description": action.description,
+        }
+        try:
+            if action.action_type in {"wait", "noop"} or (
+                action.action_type == "hotkey" and action.hotkey
+            ):
+                recovery_meta.update(self.executor.execute(action))
+        except Exception as exc:
+            recovery_meta["recovery_error"] = str(exc)
+
+        raw_observation = self._observe(
+            screenshot_path=timeline_dir / f"{step_index:02d}_attempt{attempt}_recovery.png",
+            window_title=window_title,
+            overlay_prefix=f"Recovery step {step_index} attempt {attempt}",
+        )
+        recovery_observation, state_meta = self._assess_and_wait_until_ready(
+            task=task,
+            observation=raw_observation,
+            action=action,
+            history=history,
+            timeline_dir=timeline_dir,
+            step_index=step_index,
+            attempt=attempt,
+            window_title=window_title,
+        )
+        recovery_meta.update(state_meta)
+        return recovery_observation, recovery_meta
 
     def _classify_failure(
         self,
