@@ -24,6 +24,7 @@ class Settings:
     openai_base_url: str = "https://api.chattoken.cc/"
     openai_model: str = "gpt-4o"
     openai_api_key: str | None = None
+    window_title_pattern: str = r"飞书|Feishu|Lark"
     runs_dir: Path = Path("runs")
     min_action_confidence: float = 0.55
     max_recovery_attempts: int = 2
@@ -38,6 +39,9 @@ class Settings:
             openai_base_url=os.getenv("OPENAI_BASE_URL", cls.openai_base_url),
             openai_model=os.getenv("OPENAI_MODEL", cls.openai_model),
             openai_api_key=os.getenv("OPENAI_API_KEY"),
+            window_title_pattern=os.getenv(
+                "CUA_LARK_WINDOW_TITLE_PATTERN", cls.window_title_pattern
+            ),
             runs_dir=Path(os.getenv("CUA_LARK_RUNS_DIR", str(cls.runs_dir))),
             min_action_confidence=float(
                 os.getenv("CUA_LARK_MIN_ACTION_CONFIDENCE", cls.min_action_confidence)

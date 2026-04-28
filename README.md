@@ -2,6 +2,8 @@
 
 CUA-Lark is a Computer-Use Agent testing framework for the Feishu/Lark desktop client. It observes the desktop through screenshots, asks a vision-language model to understand GUI state, executes real mouse/keyboard actions, verifies the result visually, and writes structured test reports.
 
+Runtime capture and actions are scoped to the Feishu/Lark desktop window. On Windows, the runner looks for a window title matching `飞书|Feishu|Lark`, restores and activates that window if it is in the background, captures only that window region, and maps model coordinates from window-local pixels back to screen coordinates for execution.
+
 ## Architecture
 
 The runtime is organized as a central orchestrator plus specialized agents:
@@ -54,6 +56,7 @@ Required values:
 OPENAI_BASE_URL=https://api.chattoken.cc/
 OPENAI_MODEL=gpt-4o
 OPENAI_API_KEY=replace-with-your-api-key
+CUA_LARK_WINDOW_TITLE_PATTERN=飞书|Feishu|Lark
 ```
 
 Do not commit `.env`. The repository intentionally only includes `.env.example`.
@@ -72,6 +75,8 @@ Optionally check screenshot and VLM access:
 python -m cua_lark.cli doctor --screenshot
 python -m cua_lark.cli doctor --check-vlm
 ```
+
+`doctor --screenshot` targets the Feishu/Lark window, not the whole desktop. If the window is behind other windows or minimized, the Windows window manager will try to restore and activate it before capture.
 
 Run one case in dry-run mode:
 
@@ -96,7 +101,7 @@ Before running without `--dry-run`, confirm:
 - The desktop allows screenshot, mouse, keyboard, and clipboard automation.
 - No real production chats, documents, calendars, or contacts are targeted.
 
-The executor validates coordinates against screenshot bounds. High-risk actions are blocked by default when confirmation is required.
+The executor validates coordinates against the Feishu window screenshot bounds, then converts them to absolute screen coordinates by adding the Feishu window origin. Real runs print progress for case start, planning, each step, observations, proposed actions, execution results, verification, recovery, and final report location.
 
 ## Test Cases
 

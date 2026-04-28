@@ -25,13 +25,13 @@ RiskLevel = Literal["low", "medium", "high"]
 
 
 class Point(BaseModel):
-    x: int = Field(ge=0)
-    y: int = Field(ge=0)
+    x: int
+    y: int
 
 
 class Bounds(BaseModel):
-    left: int = Field(ge=0)
-    top: int = Field(ge=0)
+    left: int
+    top: int
     width: int = Field(gt=0)
     height: int = Field(gt=0)
 
@@ -88,6 +88,8 @@ class StepPlan(BaseModel):
 class Observation(BaseModel):
     screenshot_path: str
     window_bounds: Bounds
+    screen_bounds: Bounds | None = None
+    window_title: str | None = None
     scale_factor: float = Field(default=1.0, gt=0)
     page_summary: str = ""
     ui_candidates: list[UICandidate] = Field(default_factory=list)

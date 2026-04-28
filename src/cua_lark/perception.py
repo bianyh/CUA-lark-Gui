@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import time
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
@@ -8,10 +9,18 @@ from PIL import Image
 
 from .llm import VLMClient
 from .models import Bounds, Observation, UICandidate
+from .windowing import FeishuWindowManager
 
 
 class ScreenCaptureError(RuntimeError):
     pass
+
+
+@dataclass(frozen=True)
+class CaptureResult:
+    screenshot_bounds: Bounds
+    screen_bounds: Bounds | None = None
+    window_title: str | None = None
 
 
 class ScreenCapturer:
@@ -20,23 +29,33 @@ class ScreenCapturer:
         *,
         dry_run_image: str | Path | None = None,
         blank_size: tuple[int, int] | None = None,
+        window_manager: FeishuWindowManager | None = None,
     ):
         self.dry_run_image = Path(dry_run_image) if dry_run_image else None
         self.blank_size = blank_size
+        self.window_manager = window_manager
 
-    def capture(self, output_path: str | Path) -> Bounds:
+    def capture(self, output_path: str | Path) -> CaptureResult:
         path = Path(output_path)
         path.parent.mkdir(parents=True, exist_ok=True)
 
         if self.dry_run_image:
             image = Image.open(self.dry_run_image)
             image.save(path)
-            return Bounds(left=0, top=0, width=image.width, height=image.height)
+            return CaptureResult(
+                screenshot_bounds=Bounds(left=0, top=0, width=image.width, height=image.height),
+                screen_bounds=Bounds(left=0, top=0, width=image.width, height=image.height),
+                window_title="dry-run-image",
+            )
 
         if self.blank_size:
             image = Image.new("RGB", self.blank_size, "white")
             image.save(path)
-            return Bounds(left=0, top=0, width=image.width, height=image.height)
+            return CaptureResult(
+                screenshot_bounds=Bounds(left=0, top=0, width=image.width, height=image.height),
+                screen_bounds=Bounds(left=0, top=0, width=image.width, height=image.height),
+                window_title="dry-run-blank",
+            )
 
         try:
             import pyautogui
@@ -44,12 +63,32 @@ class ScreenCapturer:
             raise ScreenCaptureError("pyautogui is required for screenshot capture") from exc
 
         try:
+            window_info = self.window_manager.ensure_active() if self.window_manager else None
+            if window_info is not None:
+                bounds = window_info.bounds
+                image = pyautogui.screenshot(
+                    region=(bounds.left, bounds.top, bounds.width, bounds.height)
+                )
+                image.save(path)
+                return CaptureResult(
+                    screenshot_bounds=Bounds(
+                        left=0,
+                        top=0,
+                        width=image.width,
+                        height=image.height,
+                    ),
+                    screen_bounds=bounds,
+                    window_title=window_info.title,
+                )
             image = pyautogui.screenshot()
         except Exception as exc:  # pragma: no cover - depends on desktop
             raise ScreenCaptureError(f"Screenshot capture failed: {exc}") from exc
 
         image.save(path)
-        return Bounds(left=0, top=0, width=image.width, height=image.height)
+        return CaptureResult(
+            screenshot_bounds=Bounds(left=0, top=0, width=image.width, height=image.height),
+            screen_bounds=Bounds(left=0, top=0, width=image.width, height=image.height),
+        )
 
 
 class PerceptionAgent:
@@ -68,7 +107,7 @@ class PerceptionAgent:
         screenshots_dir = Path(run_dir) / "screenshots"
         timestamp = int(time.time() * 1000)
         screenshot_path = screenshots_dir / f"{timestamp}_{label}.png"
-        bounds = self.capturer.capture(screenshot_path)
+        capture = self.capturer.capture(screenshot_path)
 
         page_summary = ""
         ui_candidates: list[UICandidate] = []
@@ -87,7 +126,9 @@ class PerceptionAgent:
 
         return Observation(
             screenshot_path=str(screenshot_path),
-            window_bounds=bounds,
+            window_bounds=capture.screenshot_bounds,
+            screen_bounds=capture.screen_bounds,
+            window_title=capture.window_title,
             scale_factor=self.scale_factor,
             page_summary=page_summary,
             ui_candidates=ui_candidates,

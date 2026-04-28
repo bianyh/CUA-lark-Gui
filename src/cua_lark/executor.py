@@ -3,7 +3,7 @@ from __future__ import annotations
 import time
 from pathlib import Path
 
-from .models import ActionName, ActionProposal, Bounds, ExecutionResult, Observation, Point
+from .models import ActionName, ActionProposal, ExecutionResult, Observation, Point
 
 
 class ActionExecutionError(RuntimeError):
@@ -75,17 +75,17 @@ class ActionExecutor:
         scale_factor = observation.scale_factor if observation else 1.0
 
         if proposal.action == ActionName.CLICK:
-            point = scale_point(proposal.coordinates, scale_factor)  # type: ignore[arg-type]
+            point = self._to_screen_point(proposal.coordinates, observation, scale_factor)  # type: ignore[arg-type]
             pyautogui.click(point.x, point.y)
         elif proposal.action == ActionName.DOUBLE_CLICK:
-            point = scale_point(proposal.coordinates, scale_factor)  # type: ignore[arg-type]
+            point = self._to_screen_point(proposal.coordinates, observation, scale_factor)  # type: ignore[arg-type]
             pyautogui.doubleClick(point.x, point.y)
         elif proposal.action == ActionName.RIGHT_CLICK:
-            point = scale_point(proposal.coordinates, scale_factor)  # type: ignore[arg-type]
+            point = self._to_screen_point(proposal.coordinates, observation, scale_factor)  # type: ignore[arg-type]
             pyautogui.rightClick(point.x, point.y)
         elif proposal.action == ActionName.DRAG:
-            start = scale_point(proposal.coordinates, scale_factor)  # type: ignore[arg-type]
-            end = scale_point(proposal.end_coordinates, scale_factor)  # type: ignore[arg-type]
+            start = self._to_screen_point(proposal.coordinates, observation, scale_factor)  # type: ignore[arg-type]
+            end = self._to_screen_point(proposal.end_coordinates, observation, scale_factor)  # type: ignore[arg-type]
             pyautogui.moveTo(start.x, start.y)
             pyautogui.dragTo(end.x, end.y, duration=0.3, button="left")
         elif proposal.action == ActionName.SCROLL:
@@ -103,13 +103,33 @@ class ActionExecutor:
                 raise ActionExecutionError("screenshot action requires run_dir")
             output = Path(run_dir) / "screenshots" / f"{int(time.time() * 1000)}_manual.png"
             output.parent.mkdir(parents=True, exist_ok=True)
-            pyautogui.screenshot().save(output)
+            if observation and observation.screen_bounds:
+                bounds = observation.screen_bounds
+                pyautogui.screenshot(
+                    region=(bounds.left, bounds.top, bounds.width, bounds.height)
+                ).save(output)
+            else:
+                pyautogui.screenshot().save(output)
         elif proposal.action in {ActionName.ASSERT_STATE, ActionName.FINISH}:
             return
         else:  # pragma: no cover - enum safety
             raise ActionExecutionError(f"unsupported action: {proposal.action}")
 
         time.sleep(self.pause_seconds)
+
+    @staticmethod
+    def _to_screen_point(
+        screenshot_point: Point,
+        observation: Observation | None,
+        scale_factor: float,
+    ) -> Point:
+        point = scale_point(screenshot_point, scale_factor)
+        if observation and observation.screen_bounds:
+            return Point(
+                x=observation.screen_bounds.left + point.x,
+                y=observation.screen_bounds.top + point.y,
+            )
+        return point
 
     @staticmethod
     def _paste_text(text: str) -> None:

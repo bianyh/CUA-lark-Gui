@@ -15,6 +15,7 @@ from .executor import ActionExecutor
 from .llm import ReplayVLMClient, VLMClient
 from .orchestrator import Orchestrator
 from .perception import PerceptionAgent, ScreenCapturer
+from .windowing import FeishuWindowManager
 
 app = typer.Typer(help="CUA-Lark GUI testing agent for Feishu/Lark desktop.")
 console = Console()
@@ -22,6 +23,10 @@ console = Console()
 
 def _settings() -> Settings:
     return Settings.from_env()
+
+
+def _log(message: str) -> None:
+    console.print(message, markup=False)
 
 
 @app.command()
@@ -39,14 +44,24 @@ def doctor(
     table.add_row("OPENAI_BASE_URL", settings.openai_base_url)
     table.add_row("OPENAI_MODEL", settings.openai_model)
     table.add_row("OPENAI_API_KEY", settings.redacted_api_key)
+    table.add_row("Window pattern", settings.window_title_pattern)
     table.add_row("Runs dir", str(settings.runs_dir))
     console.print(table)
 
     if screenshot:
-        capturer = ScreenCapturer()
+        capturer = ScreenCapturer(
+            window_manager=FeishuWindowManager(
+                title_pattern=settings.window_title_pattern
+            )
+        )
         output = settings.runs_dir / "doctor_screenshot.png"
-        bounds = capturer.capture(output)
-        console.print(f"Screenshot saved: {output} ({bounds.width}x{bounds.height})")
+        capture = capturer.capture(output)
+        bounds = capture.screenshot_bounds
+        console.print(
+            "Screenshot saved: "
+            f"{output} ({bounds.width}x{bounds.height}) "
+            f"window={capture.window_title or 'unknown'}"
+        )
 
     if check_vlm:
         data = VLMClient(settings).complete_json(
@@ -80,6 +95,7 @@ def run_case(
         vlm=vlm,
         perception=perception,
         executor=ActionExecutor(dry_run=dry_run),
+        logger=_log,
     )
     context = orchestrator.run(case)
     console.print(f"Run {context.run_id}: {context.status}")
@@ -103,6 +119,7 @@ def run_suite(
             vlm=vlm,
             perception=perception,
             executor=ActionExecutor(dry_run=dry_run),
+            logger=_log,
         )
         context = orchestrator.run(case)
         console.print(f"{case.id}: {context.status}")
@@ -137,11 +154,14 @@ def _build_capturer(
     dry_run: bool,
     dry_run_image: Path | None = None,
 ) -> ScreenCapturer | None:
+    settings = _settings()
     if dry_run_image is not None:
         return ScreenCapturer(dry_run_image=dry_run_image)
     if dry_run:
         return ScreenCapturer(blank_size=(1280, 800))
-    return None
+    return ScreenCapturer(
+        window_manager=FeishuWindowManager(title_pattern=settings.window_title_pattern)
+    )
 
 
 if __name__ == "__main__":
