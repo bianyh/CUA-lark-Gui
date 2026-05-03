@@ -117,6 +117,24 @@ class CaseLoaderTest(unittest.TestCase):
         self.assertTrue(provider._coerce_bool("成功"))
         self.assertFalse(provider._coerce_bool("false"))
 
+    def test_openai_provider_extracts_first_valid_json_object(self) -> None:
+        provider = OpenAICompatibleVisionPolicy.__new__(OpenAICompatibleVisionPolicy)
+        raw = (
+            '{"done": false, "rationale": "点击入口", "action": {"type": "click", "x": 10, "y": 20}}\n'
+            '{"debug": "extra object should not break parsing"}'
+        )
+        data = provider._extract_json(raw)
+        self.assertFalse(data["done"])
+        self.assertEqual(data["action"]["x"], 10)
+
+        fenced = '```json\n{"passed": true, "summary": "通过"}\n```\n补充说明'
+        data = provider._extract_json(fenced)
+        self.assertTrue(data["passed"])
+
+        wrapped = '[{"success": true, "completion_score": 1.0}] trailing text'
+        data = provider._extract_json(wrapped)
+        self.assertTrue(data["success"])
+
     def test_model_coordinate_metadata_rescales_to_screenshot_size(self) -> None:
         self.assertEqual(resized_dimensions((1384, 796), 1280), (1280, 736))
 

@@ -205,13 +205,54 @@ class OpenAICompatibleVisionPolicy(VisionPolicy):
             raise
 
     def _extract_json(self, raw: str) -> dict:
+        text = str(raw).strip()
         try:
-            return json.loads(raw)
+            return self._coerce_json_object(json.loads(text))
         except json.JSONDecodeError:
-            match = re.search(r"\{.*\}", raw, flags=re.DOTALL)
-            if not match:
-                raise RuntimeError(f"Model did not return JSON. Raw output: {raw[:500]}")
-            return json.loads(match.group(0))
+            pass
+
+        decoder = json.JSONDecoder()
+        candidates: list[dict] = []
+        for match in re.finditer(r"[\{\[]", text):
+            try:
+                value, _ = decoder.raw_decode(text[match.start() :])
+            except json.JSONDecodeError:
+                continue
+            candidate = self._coerce_json_object(value, strict=False)
+            if candidate is not None:
+                candidates.append(candidate)
+
+        if not candidates:
+            raise RuntimeError(f"Model did not return JSON. Raw output: {text[:500]}")
+
+        return self._select_json_candidate(candidates)
+
+    def _coerce_json_object(self, value, strict: bool = True) -> dict | None:
+        if isinstance(value, dict):
+            return value
+        if isinstance(value, list):
+            for item in value:
+                if isinstance(item, dict):
+                    return item
+        if strict:
+            raise RuntimeError(f"Model JSON root must be an object. Raw JSON root type: {type(value).__name__}")
+        return None
+
+    def _select_json_candidate(self, candidates: Sequence[dict]) -> dict:
+        preferred_keys = {
+            "done",
+            "action",
+            "passed",
+            "summary",
+            "success",
+            "completion_score",
+            "should_replan",
+            "root_cause",
+        }
+        for candidate in candidates:
+            if any(key in candidate for key in preferred_keys):
+                return candidate
+        return candidates[0]
 
     def _coerce_confidence(self, value) -> float:
         if isinstance(value, (int, float)):
