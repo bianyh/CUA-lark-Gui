@@ -124,11 +124,12 @@ class WindowsDesktopExecutor(DesktopExecutor):
             text = step.text or ""
             meta["text_length"] = len(text)
             if point is None:
-                point = self._default_text_entry_point()
+                point, point_strategy = self._default_text_entry_point(step)
                 if point is not None:
                     pyautogui.click(*point, button="left")
                     meta["screen_coordinates"] = list(point)
                     meta["used_default_text_entry_point"] = True
+                    meta["default_text_entry_strategy"] = point_strategy
             self._paste_text(text)
         elif step.action_type == "hotkey":
             if not step.hotkey:
@@ -280,16 +281,32 @@ class WindowsDesktopExecutor(DesktopExecutor):
         left, top, _, _ = region
         return (left + point[0], top + point[1])
 
-    def _default_text_entry_point(self) -> tuple[int, int] | None:
+    def _default_text_entry_point(self, step: ActionStep | None = None) -> tuple[tuple[int, int] | None, str]:
         region = (
             getattr(self, "_active_context_region", None)
             or getattr(self, "_window_region", None)
             or self.capture_region()
         )
         if region is None:
-            return None
+            return None, "none"
         left, top, width, height = region
-        return (left + int(width * 0.62), top + int(height * 0.86))
+        if self._looks_like_calendar_form_context(step):
+            return (left + int(width * 0.18), top + int(height * 0.12)), "calendar_form_title"
+        return (left + int(width * 0.62), top + int(height * 0.86)), "generic_bottom_input"
+
+    def _looks_like_calendar_form_context(self, step: ActionStep | None) -> bool:
+        text = " ".join(
+            str(part)
+            for part in [
+                step.description if step else "",
+                step.text if step else "",
+                step.validation_hint if step else "",
+                *(info.get("title", "") for info in getattr(self, "_window_infos", [])),
+            ]
+            if part
+        )
+        markers = ("创建日程", "新建日程", "添加主题", "会议", "日程", "周会")
+        return any(marker in text for marker in markers)
 
     def _active_window(self) -> Any:
         if not self._gw:

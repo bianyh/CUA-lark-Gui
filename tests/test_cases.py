@@ -240,6 +240,19 @@ class CaseLoaderTest(unittest.TestCase):
 
         self.assertEqual(executor._window_to_screen((260, 120)), (360, 220))
 
+    def test_calendar_form_default_text_entry_targets_title_area(self) -> None:
+        executor = WindowsDesktopExecutor.__new__(WindowsDesktopExecutor)
+        executor._window_region = (680, 295, 1848, 907)
+        executor._active_context_region = (680, 295, 1218, 859)
+        executor._window_infos = [{"title": "创建日程", "role": "active_child"}]
+        executor.capture_region = lambda: executor._window_region  # type: ignore[method-assign]
+        action = ActionStep(action_type="type_text", description="输入会议主题", text="项目周会")
+
+        point, strategy = executor._default_text_entry_point(action)
+
+        self.assertEqual(strategy, "calendar_form_title")
+        self.assertEqual(point, (899, 398))
+
     def test_action_step_accepts_model_action_aliases(self) -> None:
         click = ActionStep.from_dict({"type": "click", "x": 115, "y": 85})
         self.assertEqual(click.action_type, "click")

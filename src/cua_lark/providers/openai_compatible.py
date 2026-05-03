@@ -374,6 +374,8 @@ Use the visible active modal/child window when the task is currently asking for 
 window_candidates in the observation text includes each detected window title, role, active flag, absolute region, and relative_region inside the screenshot.
 For hotkeys, return hotkey as an array such as ["ctrl","k"], never as one combined string.
 For Chinese or mixed-language input, use type_text with the exact text to paste.
+For form fields, do not keep clicking the same empty field. After a field is focused, immediately use type_text with the exact value.
+When a Calendar "创建日程" or event editor window is open, fill fields in this practical order: title "项目周会", time "明天下午2点", attendee "张三", then save/create. Prefer type_text over repeated click once the editor is visible.
 If the target chat is already open and the message box is visible, the next useful action is type_text with "Hello World"; do not keep clicking the same message box.
 If "Hello World" is already typed in the message box, the next useful action is hotkey ["enter"] or clicking the send button.
 Avoid repeating the same click coordinate when recent actions show no progress.
