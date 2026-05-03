@@ -1,0 +1,36 @@
+id: docs_edit_project_report
+product: docs
+instruction: 在飞书云文档中打开“项目周报”，追加一段内容“本周完成自动化测试框架调试”，并确认内容可见。
+preconditions:
+  - 飞书桌面客户端已登录。
+  - 已存在名称为“项目周报”的文档。
+  - 当前账号具有编辑该文档的权限。
+assertions:
+  - type: ocr_contains
+    expected_text: 项目周报
+    description: 当前应处于项目周报文档上下文。
+  - type: ocr_contains
+    expected_text: 本周完成自动化测试框架调试
+    description: 文档中应显示追加的文本内容。
+tags:
+  - docs
+  - editing
+  - regression
+metadata:
+  window_title_keyword: 飞书
+  scripted_actions:
+    - action_type: hotkey
+      description: 打开全局搜索
+      hotkey: [ctrl, k]
+      validation_hint: 搜索
+    - action_type: type_text
+      description: 搜索项目周报文档
+      text: 项目周报
+      validation_hint: 项目周报
+    - action_type: wait
+      description: 等待文档打开
+      wait_seconds: 1.5
+    - action_type: type_text
+      description: 追加文档内容
+      text: 本周完成自动化测试框架调试
+      validation_hint: 本周完成自动化测试框架调试

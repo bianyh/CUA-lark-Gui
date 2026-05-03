@@ -30,11 +30,17 @@ from cua_lark.runner import build_default_runner
 class CaseLoaderTest(unittest.TestCase):
     def test_discover_and_load_case(self) -> None:
         files = discover_case_files(Path("cases"))
-        self.assertGreaterEqual(len(files), 5)
+        self.assertGreaterEqual(len(files), 7)
+        products = {load_task_spec(path).product for path in files}
+        self.assertTrue({"im", "calendar", "docs"}.issubset(products))
         task = load_task_spec(Path("cases/im/send_message.yaml"))
         self.assertEqual(task.id, "im_send_message")
         self.assertEqual(task.product, "im")
         self.assertGreaterEqual(len(task.scripted_actions), 1)
+
+        docs_task = load_task_spec(Path("cases/docs/create_project_report.yaml"))
+        self.assertEqual(docs_task.product, "docs")
+        self.assertIn("项目周报", docs_task.instruction)
 
     def test_paddleocr_diagnostics_returns_expected_shape(self) -> None:
         diagnostics = paddleocr_diagnostics()

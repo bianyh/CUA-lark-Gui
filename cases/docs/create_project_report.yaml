@@ -1,0 +1,45 @@
+id: docs_create_project_report
+product: docs
+instruction: 在飞书云文档中创建一个名为“项目周报”的新文档，并输入标题“2026年Q2项目进展”。
+preconditions:
+  - 飞书桌面客户端已登录。
+  - 云文档功能可用。
+  - 当前账号具有创建文档权限。
+assertions:
+  - type: ocr_contains
+    expected_text: 项目周报
+    description: 文档标题或页面中应显示项目周报。
+  - type: ocr_contains
+    expected_text: 2026年Q2项目进展
+    description: 文档正文中应显示输入的标题文本。
+  - type: vlm_semantic
+    expected_text: 已创建项目周报文档并输入标题 2026年Q2项目进展
+    description: 视觉语义应能判断新文档已创建且标题内容已录入。
+cleanup:
+  - 如果使用真实环境，必要时删除或归档测试文档。
+tags:
+  - docs
+  - creation
+  - mvp
+metadata:
+  window_title_keyword: 飞书
+  scripted_actions:
+    - action_type: hotkey
+      description: 打开全局搜索
+      hotkey: [ctrl, k]
+      validation_hint: 搜索
+    - action_type: type_text
+      description: 搜索云文档入口
+      text: 云文档
+      validation_hint: 云文档
+    - action_type: wait
+      description: 等待云文档页面稳定
+      wait_seconds: 1.5
+    - action_type: type_text
+      description: 输入新文档名称
+      text: 项目周报
+      validation_hint: 项目周报
+    - action_type: type_text
+      description: 输入文档标题
+      text: 2026年Q2项目进展
+      validation_hint: 2026年Q2项目进展
