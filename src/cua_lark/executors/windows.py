@@ -31,6 +31,9 @@ class WindowsDesktopExecutor(DesktopExecutor):
         self._gw = gw
         self._window_keyword: str | None = None
         self._window_region: tuple[int, int, int, int] | None = None
+        self._main_window_region: tuple[int, int, int, int] | None = None
+        self._active_context_region: tuple[int, int, int, int] | None = None
+        self._window_infos: list[dict[str, Any]] = []
 
     def focus_window(self, keyword: str) -> bool:
         self._window_keyword = keyword
@@ -45,24 +48,25 @@ class WindowsDesktopExecutor(DesktopExecutor):
                 window.restore()
             window.activate()
             time.sleep(0.3)
-            self._window_region = self._region_from_window(window)
-            return True
+            region = self._region_from_window(window)
+            self._main_window_region = region
+            self._window_region = region
+            return region is not None
         except Exception:
             return False
 
     def capture_region(self) -> tuple[int, int, int, int] | None:
         if not self._gw or not self._window_keyword:
             return None
-        try:
-            candidates = self._gw.getWindowsWithTitle(self._window_keyword)
-        except Exception:
+        context = self._discover_window_context()
+        if context is None:
             return None
-        if not candidates:
-            return None
-        region = self._region_from_window(candidates[0])
-        if region is None:
-            return None
+        region, window_infos, active_region, main_region = context
         self._window_region = region
+        self._window_infos = window_infos
+        self._active_context_region = active_region
+        if main_region is not None:
+            self._main_window_region = main_region
         return region
 
     def snapshot_state(self) -> dict[str, Any]:
@@ -70,6 +74,12 @@ class WindowsDesktopExecutor(DesktopExecutor):
         region = self.capture_region()
         if region is not None:
             state["capture_region"] = list(region)
+        if self._main_window_region is not None:
+            state["main_window_region"] = list(self._main_window_region)
+        if self._active_context_region is not None:
+            state["active_context_region"] = list(self._active_context_region)
+        if self._window_infos:
+            state["window_candidates"] = self._window_infos
         if self._window_keyword:
             state["focused_window_keyword"] = self._window_keyword
         return state
@@ -83,6 +93,8 @@ class WindowsDesktopExecutor(DesktopExecutor):
             meta["screen_coordinates"] = list(point)
         if self._window_region is not None:
             meta["window_region"] = list(self._window_region)
+        if self._active_context_region is not None:
+            meta["active_context_region"] = list(self._active_context_region)
 
         if step.action_type == "click":
             if point is None:
@@ -147,8 +159,66 @@ class WindowsDesktopExecutor(DesktopExecutor):
         return None
 
     def _ensure_window_active(self) -> None:
+        if self._window_region is not None:
+            return
         if self._window_keyword:
             self.focus_window(self._window_keyword)
+
+    def _discover_window_context(
+        self,
+    ) -> tuple[
+        tuple[int, int, int, int],
+        list[dict[str, Any]],
+        tuple[int, int, int, int] | None,
+        tuple[int, int, int, int] | None,
+    ] | None:
+        if not self._gw or not self._window_keyword:
+            return None
+        try:
+            keyword_windows = list(self._gw.getWindowsWithTitle(self._window_keyword))
+        except Exception:
+            keyword_windows = []
+        keyword_regions = [
+            region for region in (self._region_from_window(window) for window in keyword_windows) if region is not None
+        ]
+        if not keyword_regions:
+            return None
+
+        main_region = self._largest_region(keyword_regions)
+        candidates: list[tuple[Any, tuple[int, int, int, int], str]] = []
+        seen: set[tuple[int, int, int, int]] = set()
+
+        for window in keyword_windows:
+            region = self._region_from_window(window)
+            if region is None:
+                continue
+            candidates.append((window, region, "keyword"))
+            seen.add(region)
+
+        active_window = self._active_window()
+        active_region = self._region_from_window(active_window) if active_window is not None else None
+        active_context_region: tuple[int, int, int, int] | None = None
+        if active_window is not None and active_region is not None and self._is_context_window(active_region, main_region):
+            active_context_region = active_region
+            if active_region not in seen:
+                candidates.append((active_window, active_region, "active_child"))
+                seen.add(active_region)
+
+        for window in self._all_windows():
+            region = self._region_from_window(window)
+            if region is None or region in seen:
+                continue
+            if self._looks_like_child_window(window, region, main_region):
+                candidates.append((window, region, "overlap_child"))
+                seen.add(region)
+
+        regions = [region for _, region, _ in candidates]
+        union_region = self._union_regions(regions)
+        window_infos = [
+            self._window_info(window, region, role, union_region, active_region)
+            for window, region, role in candidates
+        ]
+        return (union_region, window_infos, active_context_region, main_region)
 
     def _region_from_window(self, window: Any) -> tuple[int, int, int, int] | None:
         try:
@@ -186,7 +256,7 @@ class WindowsDesktopExecutor(DesktopExecutor):
         return (round(point[0] * scale_x), round(point[1] * scale_y))
 
     def _point_from_normalized(self, normalized: Any) -> tuple[int, int]:
-        region = self.capture_region()
+        region = getattr(self, "_window_region", None) or self.capture_region()
         if region is not None:
             _, _, width, height = region
         else:
@@ -204,18 +274,137 @@ class WindowsDesktopExecutor(DesktopExecutor):
         return None
 
     def _window_to_screen(self, point: tuple[int, int]) -> tuple[int, int]:
-        region = self.capture_region()
+        region = getattr(self, "_window_region", None) or self.capture_region()
         if region is None:
             return point
         left, top, _, _ = region
         return (left + point[0], top + point[1])
 
     def _default_text_entry_point(self) -> tuple[int, int] | None:
-        region = self.capture_region()
+        region = (
+            getattr(self, "_active_context_region", None)
+            or getattr(self, "_window_region", None)
+            or self.capture_region()
+        )
         if region is None:
             return None
         left, top, width, height = region
         return (left + int(width * 0.62), top + int(height * 0.86))
+
+    def _active_window(self) -> Any:
+        if not self._gw:
+            return None
+        getter = getattr(self._gw, "getActiveWindow", None)
+        if getter is None:
+            return None
+        try:
+            return getter()
+        except Exception:
+            return None
+
+    def _all_windows(self) -> list[Any]:
+        if not self._gw:
+            return []
+        getter = getattr(self._gw, "getAllWindows", None)
+        if getter is None:
+            return []
+        try:
+            return list(getter())
+        except Exception:
+            return []
+
+    def _looks_like_child_window(
+        self,
+        window: Any,
+        region: tuple[int, int, int, int],
+        main_region: tuple[int, int, int, int],
+    ) -> bool:
+        title = str(getattr(window, "title", "") or "").strip()
+        if self._window_keyword and self._window_keyword in title:
+            return True
+        if self._is_minimized(window):
+            return False
+        left, top, width, height = region
+        if width < 120 or height < 80:
+            return False
+        _, _, main_width, main_height = main_region
+        if width * height >= main_width * main_height * 0.98:
+            return False
+        return self._is_context_window(region, main_region)
+
+    def _is_context_window(
+        self,
+        region: tuple[int, int, int, int],
+        main_region: tuple[int, int, int, int],
+    ) -> bool:
+        if region == main_region:
+            return True
+        if self._contains_point(main_region, self._center(region), padding=80):
+            return True
+        overlap = self._overlap_area(region, main_region)
+        area = max(1, region[2] * region[3])
+        return overlap / area >= 0.25
+
+    def _window_info(
+        self,
+        window: Any,
+        region: tuple[int, int, int, int],
+        role: str,
+        union_region: tuple[int, int, int, int],
+        active_region: tuple[int, int, int, int] | None,
+    ) -> dict[str, Any]:
+        left, top, width, height = region
+        union_left, union_top, _, _ = union_region
+        return {
+            "title": str(getattr(window, "title", "") or ""),
+            "role": role,
+            "active": bool(active_region is not None and region == active_region),
+            "region": [left, top, width, height],
+            "relative_region": [left - union_left, top - union_top, width, height],
+        }
+
+    def _is_minimized(self, window: Any) -> bool:
+        try:
+            return bool(window.isMinimized)
+        except Exception:
+            return False
+
+    def _largest_region(self, regions: list[tuple[int, int, int, int]]) -> tuple[int, int, int, int]:
+        return max(regions, key=lambda region: region[2] * region[3])
+
+    def _union_regions(self, regions: list[tuple[int, int, int, int]]) -> tuple[int, int, int, int]:
+        left = min(region[0] for region in regions)
+        top = min(region[1] for region in regions)
+        right = max(region[0] + region[2] for region in regions)
+        bottom = max(region[1] + region[3] for region in regions)
+        return (left, top, right - left, bottom - top)
+
+    def _center(self, region: tuple[int, int, int, int]) -> tuple[int, int]:
+        left, top, width, height = region
+        return (left + width // 2, top + height // 2)
+
+    def _contains_point(
+        self,
+        region: tuple[int, int, int, int],
+        point: tuple[int, int],
+        padding: int = 0,
+    ) -> bool:
+        left, top, width, height = region
+        x, y = point
+        return left - padding <= x <= left + width + padding and top - padding <= y <= top + height + padding
+
+    def _overlap_area(
+        self,
+        a: tuple[int, int, int, int],
+        b: tuple[int, int, int, int],
+    ) -> int:
+        left = max(a[0], b[0])
+        top = max(a[1], b[1])
+        right = min(a[0] + a[2], b[0] + b[2])
+        bottom = min(a[1] + a[3], b[1] + b[3])
+        if right <= left or bottom <= top:
+            return 0
+        return (right - left) * (bottom - top)
 
     def _enable_dpi_awareness(self) -> None:
         try:

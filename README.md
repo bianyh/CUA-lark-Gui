@@ -101,6 +101,16 @@ Model click coordinates are treated as coordinates for the image sent to the mod
 
 If clicks still land off target, first check `execution_meta.screen_coordinates`, `execution_meta.window_region`, and the step screenshot in the generated `run.json`. Systematic proportional drift usually means image-size mapping; a constant offset usually means window frame/DPI/focus-region mismatch.
 
+## Multi-Window Handling
+
+Feishu flows such as Calendar event creation can open a child window or modal instead of editing inside the main window.
+
+- The Windows executor now captures a Feishu window context instead of only the first main window.
+- The context includes the main Feishu window plus active/overlapping child windows that look related to Feishu.
+- `ui_hints.window_candidates` records each detected window title, role, active flag, absolute region, and relative region inside the screenshot.
+- Model click coordinates are relative to this combined screenshot context, so it can choose either the main window or the child editor window.
+- The executor uses the last captured context as the coordinate origin during execution, avoiding accidental refocus back to the main window before clicking.
+
 ## Web Control Console
 
 The Flask console provides a browser UI for controlling the GUI agent.

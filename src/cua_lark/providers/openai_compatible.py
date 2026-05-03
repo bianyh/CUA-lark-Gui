@@ -369,6 +369,9 @@ Coordinates must be pixel coordinates relative to the provided screenshot/window
 The screenshot/window image size is {observation.screen_size[0]}x{observation.screen_size[1]} before upload.
 If image compression changes the transmitted size, return coordinates for the image you see; the executor will rescale them.
 If unsure, return normalized_coordinates as [x_ratio, y_ratio] between 0 and 1 in action.metadata.
+The screenshot may contain multiple Feishu windows, such as the main app window plus a modal or child editor window.
+Use the visible active modal/child window when the task is currently asking for details inside that window.
+window_candidates in the observation text includes each detected window title, role, active flag, absolute region, and relative_region inside the screenshot.
 For hotkeys, return hotkey as an array such as ["ctrl","k"], never as one combined string.
 For Chinese or mixed-language input, use type_text with the exact text to paste.
 If the target chat is already open and the message box is visible, the next useful action is type_text with "Hello World"; do not keep clicking the same message box.

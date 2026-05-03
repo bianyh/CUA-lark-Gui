@@ -176,6 +176,8 @@ python -m cua_lark run-case --case cases/im/send_message.yaml
 | 多轮对话编排 | 已实现 | 每步基于最新 observation/history/progress/reflection 动态更新下一步 |
 | 录制回放 | 未实现 | 当前已有结构化轨迹和报告，后续可将 `run.json` 反向导出为可回放脚本 |
 
+多窗口/子窗口支持已经纳入混合定位策略。飞书日历创建日程等场景会弹出子窗口，Windows executor 会把主飞书窗口、当前活动子窗口和重叠子窗口作为一个上下文截图给模型，并在 `window_candidates` 中提供每个窗口的相对区域。模型可以根据截图和候选窗口信息决定是在主窗口还是子窗口内点击/输入。
+
 ## 3.4 渐进式实现路径
 
 | 阶段 | 目标 | 当前状态 | 验收证据 |

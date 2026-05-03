@@ -182,6 +182,64 @@ class CaseLoaderTest(unittest.TestCase):
 
         self.assertEqual(executor._normalize_window_point(action.coordinates, action), (200, 300))
 
+    def test_windows_executor_discovers_child_window_context(self) -> None:
+        class FakeWindow:
+            def __init__(
+                self,
+                title: str,
+                left: int,
+                top: int,
+                width: int,
+                height: int,
+                minimized: bool = False,
+            ) -> None:
+                self.title = title
+                self.left = left
+                self.top = top
+                self.width = width
+                self.height = height
+                self.isMinimized = minimized
+
+        main = FakeWindow("飞书", 100, 100, 1000, 700)
+        child = FakeWindow("创建日程", 360, 220, 520, 430)
+
+        class FakeGW:
+            @staticmethod
+            def getWindowsWithTitle(keyword: str):
+                return [main] if keyword == "飞书" else []
+
+            @staticmethod
+            def getActiveWindow():
+                return child
+
+            @staticmethod
+            def getAllWindows():
+                return [main, child]
+
+        executor = WindowsDesktopExecutor.__new__(WindowsDesktopExecutor)
+        executor._gw = FakeGW()
+        executor._window_keyword = "飞书"
+        executor._window_region = None
+        executor._main_window_region = None
+        executor._active_context_region = None
+        executor._window_infos = []
+
+        region = executor.capture_region()
+
+        self.assertEqual(region, (100, 100, 1000, 700))
+        self.assertEqual(executor._active_context_region, (360, 220, 520, 430))
+        self.assertEqual(len(executor._window_infos), 2)
+        child_info = next(item for item in executor._window_infos if item["role"] == "active_child")
+        self.assertTrue(child_info["active"])
+        self.assertEqual(child_info["relative_region"], [260, 120, 520, 430])
+
+    def test_windows_executor_uses_last_capture_region_for_click_mapping(self) -> None:
+        executor = WindowsDesktopExecutor.__new__(WindowsDesktopExecutor)
+        executor._window_region = (100, 100, 1000, 700)
+        executor.capture_region = lambda: (999, 999, 10, 10)  # type: ignore[method-assign]
+
+        self.assertEqual(executor._window_to_screen((260, 120)), (360, 220))
+
     def test_action_step_accepts_model_action_aliases(self) -> None:
         click = ActionStep.from_dict({"type": "click", "x": 115, "y": 85})
         self.assertEqual(click.action_type, "click")
