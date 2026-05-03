@@ -1,9 +1,10 @@
 from __future__ import annotations
 
 from datetime import UTC, datetime
-import unittest
 from pathlib import Path
 import shutil
+import time
+import unittest
 from cua_lark.cases.loader import discover_case_files, load_task_spec
 from cua_lark.config import Settings
 from cua_lark.models import (
@@ -25,6 +26,7 @@ from cua_lark.planning.hybrid import HybridPlanner
 from cua_lark.providers.mock import MockVisionPolicy
 from cua_lark.providers.openai_compatible import OpenAICompatibleVisionPolicy
 from cua_lark.runner import build_default_runner
+from cua_lark.web.app import create_app
 
 
 class CaseLoaderTest(unittest.TestCase):
@@ -449,6 +451,68 @@ class MockRunnerTest(unittest.TestCase):
             self.assertIn("recovery", policy.second_observation_path)
             self.assertEqual(len(report.step_records), 1)
             self.assertEqual(report.metrics["replans"], 1)
+        finally:
+            if root.exists():
+                shutil.rmtree(root)
+
+
+class WebConsoleTest(unittest.TestCase):
+    def test_web_console_lists_cases_and_runs_mock_case(self) -> None:
+        root = Path("tests") / ".tmp" / "web_console"
+        if root.exists():
+            shutil.rmtree(root)
+        root.mkdir(parents=True, exist_ok=True)
+        try:
+            settings = Settings(
+                repo_root=Path.cwd(),
+                artifact_root=root / "artifacts",
+                report_root=root / "reports" / "generated",
+                openai_api_key=None,
+                mock_mode=True,
+                max_steps=10,
+                max_retries=1,
+            )
+            app = create_app(settings)
+            client = app.test_client()
+
+            cases_response = client.get("/api/cases")
+            self.assertEqual(cases_response.status_code, 200)
+            cases = cases_response.get_json()["cases"]
+            self.assertTrue(any(case["id"] == "im_send_message" for case in cases))
+
+            run_response = client.post(
+                "/api/runs",
+                json={
+                    "case_id": "im_send_message",
+                    "mock_mode": True,
+                    "max_steps": 10,
+                    "max_retries": 1,
+                    "ocr_backend": "none",
+                },
+            )
+            self.assertEqual(run_response.status_code, 202)
+            run_id = run_response.get_json()["run"]["id"]
+
+            detail = None
+            for _ in range(40):
+                detail_response = client.get(f"/api/runs/{run_id}")
+                self.assertEqual(detail_response.status_code, 200)
+                detail = detail_response.get_json()["run"]
+                if detail["status"] in {"success", "failed", "error", "cancelled"}:
+                    break
+                time.sleep(0.1)
+
+            self.assertIsNotNone(detail)
+            self.assertEqual(detail["status"], "success")
+            self.assertGreaterEqual(detail["metrics"]["step_attempts"], 1)
+
+            report_response = client.get(f"/api/runs/{run_id}/report")
+            self.assertEqual(report_response.status_code, 200)
+            self.assertIn("Run Report: im_send_message", report_response.get_json()["markdown"])
+
+            timeline_response = client.get(f"/api/runs/{run_id}/timeline")
+            self.assertEqual(timeline_response.status_code, 200)
+            self.assertGreaterEqual(len(timeline_response.get_json()["images"]), 1)
         finally:
             if root.exists():
                 shutil.rmtree(root)

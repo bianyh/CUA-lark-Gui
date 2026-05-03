@@ -10,6 +10,7 @@ readme = "README.md"
 requires-python = ">=3.11"
 authors = [{ name = "bianyh" }]
 dependencies = [
+  "Flask>=3.0.0",
   "openai>=1.75.0",
   "Pillow>=10.4.0",
   "PyYAML>=6.0.1",
@@ -28,12 +29,16 @@ dev = [
 
 [project.scripts]
 cua-lark = "cua_lark.cli:main"
+cua-lark-web = "cua_lark.web.app:main"
 
 [tool.setuptools]
 package-dir = { "" = "src" }
 
 [tool.setuptools.packages.find]
 where = ["src"]
+
+[tool.setuptools.package-data]
+"cua_lark.web" = ["templates/*.html", "static/*.css", "static/*.js"]
 
 [tool.ruff]
 line-length = 100

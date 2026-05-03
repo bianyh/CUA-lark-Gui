@@ -29,6 +29,11 @@ def build_parser() -> argparse.ArgumentParser:
     run_suite.add_argument("--case-dir", default="cases")
     run_suite.add_argument("--mock", action="store_true")
 
+    web = subparsers.add_parser("web", help="Start the Flask web control console")
+    web.add_argument("--host", default="127.0.0.1")
+    web.add_argument("--port", type=int, default=5000)
+    web.add_argument("--debug", action="store_true")
+
     return parser
 
 
@@ -45,6 +50,8 @@ def main(argv: list[str] | None = None) -> int:
         return _run_case(settings.with_mock_mode(args.mock or settings.mock_mode), Path(args.case))
     if args.command == "run-suite":
         return _run_suite(settings.with_mock_mode(args.mock or settings.mock_mode), Path(args.case_dir))
+    if args.command == "web":
+        return _web(settings, host=args.host, port=args.port, debug=args.debug)
     return 1
 
 
@@ -109,3 +116,11 @@ def _run_suite(settings: Settings, case_dir: Path) -> int:
         failed += 0 if report.status == "success" else 1
     runner.runtime_console.suite_end(len(cases), failed)
     return 0 if failed == 0 else 1
+
+
+def _web(settings: Settings, host: str, port: int, debug: bool) -> int:
+    from cua_lark.web.app import create_app
+
+    app = create_app(settings)
+    app.run(host=host, port=port, debug=debug, threaded=True)
+    return 0

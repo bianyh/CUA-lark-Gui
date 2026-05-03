@@ -3,6 +3,7 @@ from __future__ import annotations
 from datetime import UTC, datetime
 from pathlib import Path
 import time
+from typing import Callable
 
 from cua_lark.config import Settings
 from cua_lark.executors.base import DesktopExecutor
@@ -53,6 +54,7 @@ class AgentRunner:
         self.reporter = reporter
         self.runtime_console = runtime_console
         self.state_analyzer = state_analyzer
+        self.stop_requested: Callable[[], bool] | None = None
 
     def run_task(self, task: TaskSpec) -> RunReport:
         self.settings.ensure_runtime_dirs()
@@ -98,6 +100,9 @@ class AgentRunner:
         latest_reflection: ReflectionResult | None = None
 
         for step_index in range(1, self.settings.max_steps + 1):
+            if self._should_stop():
+                failure_reason = "用户请求停止任务。"
+                break
             before = current_observation
             last_observation = before
             self.runtime_console.observation(step_index=step_index, observation=before)
@@ -129,6 +134,9 @@ class AgentRunner:
             attempt_before = before
             last_failed_reflection: ReflectionResult | None = None
             for attempt in range(1, max_attempts + 1):
+                if self._should_stop():
+                    failure_reason = "用户请求停止任务。"
+                    break
                 attempt_observation_before = attempt_before
                 self.runtime_console.execution_start(
                     step_index=step_index,
@@ -201,7 +209,7 @@ class AgentRunner:
                     progress_assessment.completion_score,
                     step_records,
                 )
-                if success and stalled:
+                if success and not planning.scripted and stalled:
                     validation = ValidationResult(
                         passed=False,
                         summary="动作执行后任务进度未提升，判定为停滞并触发重新规划。",
@@ -604,6 +612,14 @@ class AgentRunner:
             return 0.0
         successes = sum(1 for record in step_records if record.success)
         return round(successes / len(step_records), 4)
+
+    def _should_stop(self) -> bool:
+        if self.stop_requested is None:
+            return False
+        try:
+            return bool(self.stop_requested())
+        except Exception:
+            return False
 
 
 def build_default_runner(settings: Settings) -> AgentRunner:

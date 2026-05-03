@@ -65,6 +65,14 @@ python -m cua_lark run-case --case cases/im/send_message.yaml --mock
 python -m cua_lark run-suite --case-dir cases --mock
 ```
 
+9. Start the web control console.
+
+```powershell
+python -m cua_lark web --host 127.0.0.1 --port 5000
+```
+
+Then open `http://127.0.0.1:5000` in your browser.
+
 ## Repository Layout
 
 ```text
@@ -80,6 +88,29 @@ tests/                  Lightweight unit tests for the core loop
 - `--mock`: Uses synthetic screenshots and a mock executor. This is the safe default for CI and architecture validation.
 - Desktop mode: Requires Windows, Feishu desktop client, `pyautogui`, `pygetwindow`, and `pyperclip`.
 - OCR is optional. The current default is no OCR because the vision model can read the screenshot directly and PaddleOCR may be unstable in some Windows conda environments.
+
+## Web Control Console
+
+The Flask console provides a browser UI for controlling the GUI agent.
+
+```powershell
+python -m cua_lark web --host 127.0.0.1 --port 5000
+```
+
+If the package scripts are installed, this equivalent command is also available:
+
+```powershell
+cua-lark-web --host 127.0.0.1 --port 5000
+```
+
+The console supports:
+
+- Listing bundled Feishu cases.
+- Selecting Mock or Desktop mode.
+- Configuring max steps, retries, OCR backend, target window keyword, and load-wait behavior.
+- Starting one run at a time.
+- Requesting stop; the runner exits at the next safe checkpoint.
+- Viewing live runtime logs, metrics, Markdown report, and screenshot timeline.
 
 ## Runtime Logs
 

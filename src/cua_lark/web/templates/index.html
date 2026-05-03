@@ -1,0 +1,158 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>CUA-Lark GUI 控制台</title>
+    <link rel="preconnect" href="https://unpkg.com" />
+    <link rel="stylesheet" href="{{ url_for('static', filename='styles.css') }}" />
+  </head>
+  <body>
+    <div class="app-shell">
+      <header class="topbar">
+        <div>
+          <h1>CUA-Lark GUI 控制台</h1>
+          <p id="environmentLine">正在读取运行环境</p>
+        </div>
+        <div class="topbar-actions">
+          <button class="icon-button" id="refreshButton" type="button" title="刷新">
+            <i data-lucide="refresh-cw"></i>
+          </button>
+          <button class="icon-button" id="openReportButton" type="button" title="打开报告" disabled>
+            <i data-lucide="file-text"></i>
+          </button>
+        </div>
+      </header>
+
+      <main class="workspace">
+        <aside class="control-panel">
+          <section class="panel-section">
+            <div class="section-title">
+              <i data-lucide="list-checks"></i>
+              <h2>测试用例</h2>
+            </div>
+            <label class="field">
+              <span>用例</span>
+              <select id="caseSelect"></select>
+            </label>
+            <div class="case-summary" id="caseSummary"></div>
+          </section>
+
+          <section class="panel-section">
+            <div class="section-title">
+              <i data-lucide="sliders-horizontal"></i>
+              <h2>运行参数</h2>
+            </div>
+            <div class="segmented" role="group" aria-label="运行模式">
+              <button class="segment active" id="mockModeButton" type="button" data-mode="mock">Mock</button>
+              <button class="segment" id="desktopModeButton" type="button" data-mode="desktop">Desktop</button>
+            </div>
+            <label class="field">
+              <span>窗口关键字</span>
+              <input id="windowKeywordInput" type="text" value="飞书" />
+            </label>
+            <div class="inline-fields">
+              <label class="field">
+                <span>最大步骤</span>
+                <input id="maxStepsInput" type="number" min="1" max="50" value="15" />
+              </label>
+              <label class="field">
+                <span>重试次数</span>
+                <input id="maxRetriesInput" type="number" min="0" max="10" value="2" />
+              </label>
+            </div>
+            <label class="field">
+              <span>OCR 后端</span>
+              <select id="ocrBackendSelect">
+                <option value="none">none</option>
+                <option value="paddleocr">paddleocr</option>
+              </select>
+            </label>
+            <label class="toggle-row">
+              <input id="loadWaitToggle" type="checkbox" checked />
+              <span>等待界面稳定</span>
+            </label>
+          </section>
+
+          <section class="panel-section controls">
+            <button class="primary-button" id="startButton" type="button">
+              <i data-lucide="play"></i>
+              <span>启动任务</span>
+            </button>
+            <button class="danger-button" id="stopButton" type="button" disabled>
+              <i data-lucide="square"></i>
+              <span>停止</span>
+            </button>
+          </section>
+        </aside>
+
+        <section class="run-panel">
+          <div class="status-strip">
+            <div class="status-block">
+              <span>当前状态</span>
+              <strong id="statusValue">空闲</strong>
+            </div>
+            <div class="status-block">
+              <span>任务</span>
+              <strong id="taskValue">未选择</strong>
+            </div>
+            <div class="status-block">
+              <span>耗时</span>
+              <strong id="durationValue">0.00s</strong>
+            </div>
+            <div class="status-block">
+              <span>模式</span>
+              <strong id="modeValue">Mock</strong>
+            </div>
+          </div>
+
+          <nav class="tabs" aria-label="运行信息">
+            <button class="tab active" data-tab="logs" type="button">
+              <i data-lucide="terminal"></i>
+              <span>日志</span>
+            </button>
+            <button class="tab" data-tab="metrics" type="button">
+              <i data-lucide="activity"></i>
+              <span>指标</span>
+            </button>
+            <button class="tab" data-tab="report" type="button">
+              <i data-lucide="file-text"></i>
+              <span>报告</span>
+            </button>
+            <button class="tab" data-tab="timeline" type="button">
+              <i data-lucide="images"></i>
+              <span>截图</span>
+            </button>
+          </nav>
+
+          <section class="tab-view active" id="logsView">
+            <div class="log-toolbar">
+              <span id="logCount">0 条日志</span>
+              <button class="ghost-button" id="clearLogsButton" type="button">
+                <i data-lucide="eraser"></i>
+                <span>清空显示</span>
+              </button>
+            </div>
+            <div class="log-stream" id="logStream"></div>
+          </section>
+
+          <section class="tab-view" id="metricsView">
+            <div class="metrics-grid" id="metricsGrid"></div>
+          </section>
+
+          <section class="tab-view" id="reportView">
+            <pre class="report-box" id="reportBox">任务完成后会显示 Markdown 报告。</pre>
+          </section>
+
+          <section class="tab-view" id="timelineView">
+            <div class="timeline-grid" id="timelineGrid"></div>
+          </section>
+        </section>
+      </main>
+    </div>
+
+    <div class="toast" id="toast" hidden></div>
+    <script src="https://unpkg.com/lucide@latest/dist/umd/lucide.min.js"></script>
+    <script src="{{ url_for('static', filename='app.js') }}"></script>
+  </body>
+</html>
