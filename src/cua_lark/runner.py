@@ -95,6 +95,7 @@ class AgentRunner:
             window_title=window_keyword,
         )
         last_observation: Observation | None = current_observation
+        latest_reflection: ReflectionResult | None = None
 
         for step_index in range(1, self.settings.max_steps + 1):
             before = current_observation
@@ -106,9 +107,10 @@ class AgentRunner:
                 history=step_records,
                 scripted_index=scripted_index,
                 remaining_steps=self.settings.max_steps - step_index,
+                latest_reflection=latest_reflection,
             )
             decision = planning.decision
-            source_label = "脚本动作" if planning.scripted else "模型决策"
+            source_label = "脚本动作" if planning.scripted else "模型动态规划"
             self.runtime_console.planning(
                 step_index=step_index,
                 decision=decision,
@@ -125,6 +127,7 @@ class AgentRunner:
             step_succeeded = False
             max_attempts = self.settings.max_retries + 1
             attempt_before = before
+            last_failed_reflection: ReflectionResult | None = None
             for attempt in range(1, max_attempts + 1):
                 attempt_observation_before = attempt_before
                 self.runtime_console.execution_start(
@@ -193,6 +196,21 @@ class AgentRunner:
                 )
                 self.runtime_console.progress(step_index, progress_assessment)
 
+                stalled = self._is_stalled_action(
+                    decision.action,
+                    progress_assessment.completion_score,
+                    step_records,
+                )
+                if success and stalled:
+                    validation = ValidationResult(
+                        passed=False,
+                        summary="动作执行后任务进度未提升，判定为停滞并触发重新规划。",
+                        strategy="progress_stall",
+                        confidence=progress_assessment.confidence,
+                    )
+                    replan_reason = ReplanReason.VALIDATION_FAILED
+                    success = False
+
                 reflection: ReflectionResult | None = None
                 if not success:
                     reflection = self.planner.policy.reflect_after_step(
@@ -204,6 +222,7 @@ class AgentRunner:
                         progress=progress_assessment,
                         history=step_records,
                     )
+                    last_failed_reflection = reflection
                     self.runtime_console.reflection(step_index, reflection)
                 self.runtime_console.execution_result(
                     step_index=step_index,
@@ -237,19 +256,30 @@ class AgentRunner:
                     )
                     step_succeeded = True
                     current_observation = after
+                    latest_reflection = None
                     break
 
-                should_retry = attempt < max_attempts
-                self.runtime_console.retry(
-                    step_index=step_index,
-                    attempt=attempt,
-                    max_attempts=max_attempts,
-                    reason=error_message or validation.summary,
-                    will_retry=should_retry,
-                )
-
                 attempt_before = after
-                if should_retry and reflection and reflection.should_replan and reflection.suggested_action is not None:
+                should_replan = bool(reflection and reflection.should_replan and not planning.scripted)
+                should_retry = attempt < max_attempts and not should_replan
+
+                if should_replan and reflection is not None:
+                    self.runtime_console.replan(step_index, reflection)
+                else:
+                    self.runtime_console.retry(
+                        step_index=step_index,
+                        attempt=attempt,
+                        max_attempts=max_attempts,
+                        reason=error_message or validation.summary,
+                        will_retry=should_retry,
+                    )
+
+                if (
+                    reflection
+                    and reflection.should_replan
+                    and reflection.suggested_action is not None
+                    and (should_retry or should_replan)
+                ):
                     recovery_observation, recovery_meta = self._apply_recovery_action(
                         step_index=step_index,
                         attempt=attempt,
@@ -285,12 +315,22 @@ class AgentRunner:
                     )
                 )
 
+                if should_replan:
+                    current_observation = attempt_before
+                    latest_reflection = reflection
+                    break
+
                 if planning.scripted and attempt > self.settings.max_retries:
                     failure_reason = error_message or validation.summary
                     break
 
             if failure_reason:
                 break
+
+            if not step_succeeded:
+                current_observation = last_observation or current_observation
+                if latest_reflection is None and last_failed_reflection is not None:
+                    latest_reflection = last_failed_reflection
 
             if not step_succeeded and not planning.scripted:
                 continue
@@ -325,6 +365,9 @@ class AgentRunner:
             "load_timeouts": sum(
                 1 for record in step_records if bool(record.execution_meta.get("load_timed_out", False))
             ),
+            "replans": sum(
+                1 for record in step_records if record.reflection is not None and record.reflection.should_replan
+            ),
             "max_steps": self.settings.max_steps,
             "max_retries": self.settings.max_retries,
         }
@@ -347,6 +390,7 @@ class AgentRunner:
                 "mock_mode": self.settings.mock_mode,
                 "window_title_keyword": window_keyword,
                 "provider_mode": self.settings.provider_mode,
+                "planner_mode": "scripted_fallback" if self.planner.prefer_scripted else "adaptive",
                 "planner_backend": getattr(self.planner.policy, "backend_name", self.planner.policy.__class__.__name__),
                 "executor_backend": getattr(self.executor, "backend_name", self.executor.__class__.__name__),
                 "ocr_backend": getattr(self.ocr_provider, "backend_name", self.ocr_provider.__class__.__name__),
@@ -370,7 +414,11 @@ class AgentRunner:
             overlay_lines=overlay_lines,
             region=region,
         )
-        ocr_blocks = self.ocr_provider.extract(image_path)
+        try:
+            ocr_blocks = self.ocr_provider.extract(image_path)
+        except Exception as exc:
+            state["ocr_error"] = str(exc)
+            ocr_blocks = []
         state["capture_mode"] = capture_mode
         return Observation(
             screenshot_path=str(image_path),
@@ -519,6 +567,38 @@ class AgentRunner:
             return ReplanReason.VALIDATION_FAILED
         return ReplanReason.UNKNOWN
 
+    def _is_stalled_action(
+        self,
+        action,
+        completion_score: float,
+        history: list[StepRecord],
+    ) -> bool:
+        if action.validation_hint:
+            return False
+        if action.action_type not in {"click", "double_click", "wait"}:
+            return False
+        if len(history) < 2:
+            return False
+        previous_scores = [
+            record.progress_assessment.completion_score
+            for record in history[-3:]
+            if record.progress_assessment is not None
+        ]
+        if not previous_scores:
+            return False
+        if completion_score > max(previous_scores) + 0.05:
+            return False
+        if action.action_type == "wait":
+            return True
+        if action.coordinates is None:
+            return False
+        recent_clicks = [
+            record.action.coordinates
+            for record in history[-3:]
+            if record.action.action_type in {"click", "double_click"} and record.action.coordinates is not None
+        ]
+        return len(recent_clicks) >= 2
+
     def _success_rate(self, step_records: list[StepRecord]) -> float:
         if not step_records:
             return 0.0
@@ -554,7 +634,7 @@ def build_default_runner(settings: Settings) -> AgentRunner:
                     f"PaddleOCR unavailable, falling back to no OCR: {reason}"
                 )
 
-    planner = HybridPlanner(policy=policy)
+    planner = HybridPlanner(policy=policy, prefer_scripted=isinstance(policy, MockVisionPolicy))
     screenshotter = Screenshotter(mock_mode=settings.mock_mode or isinstance(executor, MockDesktopExecutor))
     validator = CompositeValidator(vision_policy=policy)
     reporter = ReportWriter()

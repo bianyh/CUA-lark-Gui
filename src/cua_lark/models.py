@@ -3,6 +3,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from datetime import datetime
 from enum import Enum
+import re
 from pathlib import Path
 from typing import Any
 
@@ -147,11 +148,12 @@ class ActionStep:
     @classmethod
     def from_dict(cls, data: dict[str, Any]) -> "ActionStep":
         target = data.get("target")
-        coordinates = data.get("coordinates")
-        parsed_coordinates = None
-        if isinstance(coordinates, (list, tuple)) and len(coordinates) == 2:
-            parsed_coordinates = (int(coordinates[0]), int(coordinates[1]))
+        action_type = cls._parse_action_type(data)
+        parsed_coordinates = cls._parse_coordinates(data.get("coordinates"))
+        if parsed_coordinates is None:
+            parsed_coordinates = cls._parse_coordinates_from_xy(data)
         reserved = {
+            "type",
             "action_type",
             "description",
             "target",
@@ -164,22 +166,108 @@ class ActionStep:
             "reasoning",
             "validation_hint",
             "coordinates",
+            "x",
+            "y",
         }
         return cls(
-            action_type=str(data.get("action_type", "wait")),
-            description=str(data.get("description", data.get("action_type", "step"))),
+            action_type=action_type,
+            description=str(data.get("description", data.get("reasoning", action_type))),
             target=ActionTarget.from_dict(target) if isinstance(target, dict) else None,
             text=str(data["text"]) if data.get("text") is not None else None,
-            hotkey=[str(item) for item in data.get("hotkey", [])],
+            hotkey=cls._parse_hotkey(data.get("hotkey", [])),
             scroll_amount=int(data.get("scroll_amount", 0)),
             wait_seconds=float(data.get("wait_seconds", 1.0)),
             button=str(data.get("button", "left")),
             confidence=float(data.get("confidence", 0.0)),
             reasoning=str(data.get("reasoning", "")),
-            validation_hint=str(data["validation_hint"]) if data.get("validation_hint") is not None else None,
+            validation_hint=cls._parse_validation_hint(data, action_type),
             coordinates=parsed_coordinates,
             metadata={key: value for key, value in data.items() if key not in reserved},
         )
+
+    @classmethod
+    def _parse_action_type(cls, data: dict[str, Any]) -> str:
+        raw_type = data.get("action_type", data.get("type"))
+        if raw_type is None:
+            if data.get("hotkey") is not None:
+                return "hotkey"
+            if data.get("text") is not None:
+                return "type_text"
+            if data.get("coordinates") is not None or ("x" in data and "y" in data):
+                return "click"
+            return "wait"
+
+        action_type = str(raw_type).strip().lower()
+        aliases = {
+            "type": "type_text",
+            "input": "type_text",
+            "text": "type_text",
+            "keypress": "hotkey",
+            "key_press": "hotkey",
+            "shortcut": "hotkey",
+            "tap": "click",
+            "left_click": "click",
+            "doubleclick": "double_click",
+            "rightclick": "right_click",
+        }
+        return aliases.get(action_type, action_type)
+
+    @classmethod
+    def _parse_coordinates(cls, value: Any) -> tuple[int, int] | None:
+        if isinstance(value, dict) and "x" in value and "y" in value:
+            return (int(value["x"]), int(value["y"]))
+        if isinstance(value, str):
+            numbers = re.findall(r"-?\d+(?:\.\d+)?", value)
+            if len(numbers) >= 2:
+                return (int(float(numbers[0])), int(float(numbers[1])))
+        if isinstance(value, (list, tuple)) and len(value) == 2:
+            return (int(value[0]), int(value[1]))
+        return None
+
+    @classmethod
+    def _parse_coordinates_from_xy(cls, data: dict[str, Any]) -> tuple[int, int] | None:
+        if "x" not in data or "y" not in data:
+            return None
+        return (int(float(data["x"])), int(float(data["y"])))
+
+    @classmethod
+    def _parse_validation_hint(cls, data: dict[str, Any], action_type: str) -> str | None:
+        if data.get("validation_hint") is not None:
+            return str(data["validation_hint"])
+        if action_type == "type_text" and data.get("text") is not None:
+            return str(data["text"])
+        return None
+
+    @classmethod
+    def _parse_hotkey(cls, value: Any) -> list[str]:
+        if value is None:
+            return []
+        raw_items = value if isinstance(value, (list, tuple)) else [value]
+        keys: list[str] = []
+        for item in raw_items:
+            text = str(item).strip()
+            if not text:
+                continue
+            parts = re.split(r"\s*(?:\+|,|;)\s*", text)
+            keys.extend(cls._normalize_key(part) for part in parts if part.strip())
+        return [key for key in keys if key]
+
+    @classmethod
+    def _normalize_key(cls, value: str) -> str:
+        key = value.strip().lower().replace(" ", "")
+        aliases = {
+            "control": "ctrl",
+            "ctrlleft": "ctrl",
+            "ctrlright": "ctrl",
+            "return": "enter",
+            "escape": "esc",
+            "windows": "win",
+            "command": "win",
+            "cmd": "win",
+            "option": "alt",
+            "del": "delete",
+        }
+        return aliases.get(key, key)
 
 
 @dataclass(slots=True)

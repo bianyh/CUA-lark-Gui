@@ -104,7 +104,9 @@ class PaddleOCRProvider(OCRProvider):
             normalized = self._normalize_result_item(item)
             texts = self._to_list(normalized.get("rec_texts"))
             scores = self._to_list(normalized.get("rec_scores"))
-            boxes = self._to_list(normalized.get("rec_boxes") or normalized.get("rec_polys") or normalized.get("dt_polys"))
+            boxes = self._to_list(
+                self._first_present(normalized, ("rec_boxes", "rec_polys", "dt_polys"))
+            )
             max_len = max(len(texts), len(scores), len(boxes))
             for index in range(max_len):
                 text = str(texts[index]).strip() if index < len(texts) else ""
@@ -114,6 +116,13 @@ class PaddleOCRProvider(OCRProvider):
                 bbox = self._bbox_from_any(boxes[index]) if index < len(boxes) else None
                 blocks.append(OCRBlock(text=text, confidence=score, bbox=bbox))
         return blocks
+
+    def _first_present(self, data: Mapping[str, Any], keys: Sequence[str]) -> Any:
+        for key in keys:
+            value = data.get(key)
+            if value is not None:
+                return value
+        return None
 
     def _normalize_result_item(self, item: Any) -> dict[str, Any]:
         if isinstance(item, Mapping):

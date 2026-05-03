@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+from pathlib import Path
 import re
 from typing import Sequence
 
@@ -45,8 +46,17 @@ class OpenAICompatibleVisionPolicy(VisionPolicy):
         observation: Observation,
         history: Sequence[StepRecord],
         remaining_steps: int,
+        planning_hints: Sequence[ActionStep] | None = None,
+        latest_reflection: ReflectionResult | None = None,
     ) -> PolicyDecision:
-        prompt = self._build_planning_prompt(task, observation, history, remaining_steps)
+        prompt = self._build_planning_prompt(
+            task,
+            observation,
+            history,
+            remaining_steps,
+            planning_hints=planning_hints,
+            latest_reflection=latest_reflection,
+        )
         raw = self._call_model(prompt, [observation.screenshot_path], detail="auto")
         data = self._extract_json(raw)
         action = ActionStep.from_dict(data["action"]) if isinstance(data.get("action"), dict) else None
@@ -73,14 +83,14 @@ class OpenAICompatibleVisionPolicy(VisionPolicy):
             ValidationEvidence(
                 type="vlm_semantic",
                 content=str(data.get("summary", "")),
-                score=float(data.get("confidence", 0.0)),
+                score=self._coerce_confidence(data.get("confidence", 0.0)),
             )
         ]
         return ValidationResult(
-            passed=bool(data.get("passed", False)),
+            passed=self._coerce_bool(data.get("passed", False)),
             summary=str(data.get("summary", "")),
             strategy=f"openai_{assertion.type}",
-            confidence=float(data.get("confidence", 0.0)),
+            confidence=self._coerce_confidence(data.get("confidence", 0.0)),
             evidence=evidence,
             details={"raw": data},
         )
@@ -98,13 +108,13 @@ class OpenAICompatibleVisionPolicy(VisionPolicy):
         evidence = [str(item) for item in data.get("evidence", []) if str(item).strip()]
         unmet_goals = [str(item) for item in data.get("unmet_goals", []) if str(item).strip()]
         return ProgressAssessment(
-            success=bool(data.get("success", False)),
-            completion_score=float(data.get("completion_score", 0.0)),
+            success=self._coerce_bool(data.get("success", False)),
+            completion_score=self._coerce_ratio(data.get("completion_score", 0.0)),
             progress_label=str(data.get("progress_label", "未知")),
             summary=str(data.get("summary", "")),
             evidence=evidence,
             unmet_goals=unmet_goals,
-            confidence=float(data.get("confidence", 0.0)),
+            confidence=self._coerce_confidence(data.get("confidence", 0.0)),
         )
 
     def reflect_after_step(
@@ -126,12 +136,12 @@ class OpenAICompatibleVisionPolicy(VisionPolicy):
             else None
         )
         return ReflectionResult(
-            should_replan=bool(data.get("should_replan", False)),
+            should_replan=self._coerce_bool(data.get("should_replan", False)),
             root_cause=str(data.get("root_cause", "")),
             failure_stage=str(data.get("failure_stage", "")),
             suggested_strategy=str(data.get("suggested_strategy", "")),
             suggested_action=suggested_action,
-            confidence=float(data.get("confidence", 0.0)),
+            confidence=self._coerce_confidence(data.get("confidence", 0.0)),
         )
 
     def _call_model(self, prompt: str, screenshot_paths: Sequence[str], detail: str) -> str:
@@ -201,23 +211,111 @@ class OpenAICompatibleVisionPolicy(VisionPolicy):
                 raise RuntimeError(f"Model did not return JSON. Raw output: {raw[:500]}")
             return json.loads(match.group(0))
 
+    def _coerce_confidence(self, value) -> float:
+        if isinstance(value, (int, float)):
+            return self._normalize_ratio(float(value))
+        text = str(value).strip()
+        if not text:
+            return 0.0
+
+        confidence_map = {
+            "极低": 0.1,
+            "很低": 0.15,
+            "较低": 0.25,
+            "低": 0.3,
+            "偏低": 0.35,
+            "中低": 0.4,
+            "中等": 0.55,
+            "一般": 0.55,
+            "中": 0.55,
+            "中高": 0.7,
+            "较高": 0.75,
+            "高": 0.85,
+            "很高": 0.92,
+            "极高": 0.97,
+        }
+        if text in confidence_map:
+            return confidence_map[text]
+
+        percent_match = re.search(r"(-?\d+(?:\.\d+)?)\s*%", text)
+        if percent_match:
+            return self._normalize_ratio(float(percent_match.group(1)) / 100.0)
+
+        number_match = re.search(r"-?\d+(?:\.\d+)?", text)
+        if number_match:
+            return self._normalize_ratio(float(number_match.group(0)))
+
+        return 0.0
+
+    def _coerce_ratio(self, value) -> float:
+        return self._coerce_confidence(value)
+
+    def _coerce_bool(self, value) -> bool:
+        if isinstance(value, bool):
+            return value
+        if isinstance(value, (int, float)):
+            return bool(value)
+        text = str(value).strip().lower()
+        return text in {"true", "1", "yes", "y", "pass", "passed", "成功", "是", "需要", "已完成"}
+
+    def _normalize_ratio(self, value: float) -> float:
+        if value > 1.0:
+            value = value / 100.0
+        return max(0.0, min(1.0, value))
+
     def _build_planning_prompt(
         self,
         task: TaskSpec,
         observation: Observation,
         history: Sequence[StepRecord],
         remaining_steps: int,
+        planning_hints: Sequence[ActionStep] | None = None,
+        latest_reflection: ReflectionResult | None = None,
     ) -> str:
         recent_actions = [
-            f"{record.index}.{record.attempt} {record.action.action_type}: {record.action.description} -> {record.success}"
+            " | ".join(
+                part
+                for part in [
+                    f"{record.index}.{record.attempt} {record.action.action_type}: {record.action.description}",
+                    f"success={record.success}",
+                    f"validation={record.validation.summary}" if record.validation else "",
+                    f"reflection={record.reflection.suggested_strategy}" if record.reflection else "",
+                ]
+                if part
+            )
             for record in history[-5:]
         ]
+        hint_lines = [
+            f"{index}. {hint.action_type}: {hint.description}"
+            f"{f' | text={hint.text}' if hint.text else ''}"
+            f"{f' | hotkey={'+'.join(hint.hotkey)}' if hint.hotkey else ''}"
+            f"{f' | validation_hint={hint.validation_hint}' if hint.validation_hint else ''}"
+            for index, hint in enumerate(planning_hints or [], start=1)
+        ]
+        reflection_text = "无"
+        if latest_reflection is not None:
+            reflection_text = (
+                f"should_replan={latest_reflection.should_replan}; "
+                f"stage={latest_reflection.failure_stage}; "
+                f"root_cause={latest_reflection.root_cause}; "
+                f"strategy={latest_reflection.suggested_strategy}"
+            )
         return f"""
 You are controlling the Feishu desktop client as a testing agent.
 Return strict JSON with keys: done, rationale, replan_reason, action.
 Allowed action types: click, double_click, right_click, drag, scroll, type_text, hotkey, wait, assert, noop.
 If no action is needed, set done=true and action=null.
 The rationale field must be concise Simplified Chinese.
+Decide only the next action from the current screenshot and history. Do not execute a fixed prewritten plan.
+Scripted hints are optional examples, not mandatory steps. Skip any hint that is already satisfied, stale, or unsafe for the current UI.
+When the latest reflection says replanning is needed, revise the strategy and avoid repeating the failed action unless the current observation strongly justifies it.
+For visible UI controls, prefer click/double_click with coordinates from the current screenshot when that is more reliable than a hotkey.
+Coordinates must be pixel coordinates relative to the provided screenshot/window image, not absolute desktop coordinates.
+For hotkeys, return hotkey as an array such as ["ctrl","k"], never as one combined string.
+For Chinese or mixed-language input, use type_text with the exact text to paste.
+If the target chat is already open and the message box is visible, the next useful action is type_text with "Hello World"; do not keep clicking the same message box.
+If "Hello World" is already typed in the message box, the next useful action is hotkey ["enter"] or clicking the send button.
+Avoid repeating the same click coordinate when recent actions show no progress.
 
 Task:
 {task.instruction}
@@ -242,6 +340,12 @@ Remaining steps:
 
 Recent actions:
 {recent_actions}
+
+Latest reflection:
+{reflection_text}
+
+Optional scripted hints:
+{hint_lines}
 """.strip()
 
     def _build_validation_prompt(
@@ -367,6 +471,3 @@ After observation text:
 Recent actions:
 {recent_actions}
 """.strip()
-
-
-from pathlib import Path

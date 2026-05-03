@@ -3,7 +3,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Sequence
 
-from cua_lark.models import Observation, PolicyDecision, StepRecord, TaskSpec
+from cua_lark.models import Observation, PolicyDecision, ReflectionResult, StepRecord, TaskSpec
 from cua_lark.providers.base import VisionPolicy
 
 
@@ -14,8 +14,9 @@ class PlanningResult:
 
 
 class HybridPlanner:
-    def __init__(self, policy: VisionPolicy | None) -> None:
+    def __init__(self, policy: VisionPolicy | None, prefer_scripted: bool = False) -> None:
         self.policy = policy
+        self.prefer_scripted = prefer_scripted
 
     def next_action(
         self,
@@ -24,9 +25,10 @@ class HybridPlanner:
         history: Sequence[StepRecord],
         scripted_index: int,
         remaining_steps: int,
+        latest_reflection: ReflectionResult | None = None,
     ) -> PlanningResult:
         scripted_actions = task.scripted_actions
-        if scripted_index < len(scripted_actions):
+        if self.prefer_scripted and scripted_index < len(scripted_actions):
             action = scripted_actions[scripted_index]
             return PlanningResult(
                 decision=PolicyDecision(
@@ -38,15 +40,32 @@ class HybridPlanner:
             )
 
         if self.policy is None:
+            if scripted_index < len(scripted_actions):
+                action = scripted_actions[scripted_index]
+                return PlanningResult(
+                    decision=PolicyDecision(
+                        done=False,
+                        rationale="当前没有可用的视觉策略，回退到预置脚本动作。",
+                        action=action,
+                    ),
+                    scripted=True,
+                )
             return PlanningResult(
                 decision=PolicyDecision(
                     done=True,
-                    rationale="预置脚本动作已执行完，且当前没有可用的视觉策略。",
+                    rationale="当前没有可用的视觉策略，也没有可执行的回退动作。",
                 ),
                 scripted=False,
             )
 
         return PlanningResult(
-            decision=self.policy.plan_next_action(task, observation, history, remaining_steps),
+            decision=self.policy.plan_next_action(
+                task,
+                observation,
+                history,
+                remaining_steps,
+                planning_hints=scripted_actions,
+                latest_reflection=latest_reflection,
+            ),
             scripted=False,
         )

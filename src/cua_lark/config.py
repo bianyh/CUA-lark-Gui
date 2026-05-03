@@ -45,7 +45,7 @@ class Settings:
     max_steps: int = 15
     max_retries: int = 2
     mock_mode: bool = False
-    ocr_backend: str = "paddleocr"
+    ocr_backend: str = "none"
     paddleocr_lang: str = "ch"
     runtime_logs: bool = True
     runtime_preview_chars: int = 80
@@ -74,7 +74,7 @@ class Settings:
             max_steps=_parse_int(os.getenv("CUA_MAX_STEPS"), 15),
             max_retries=_parse_int(os.getenv("CUA_MAX_RETRIES"), 2),
             mock_mode=_parse_bool(os.getenv("CUA_MOCK_MODE"), False),
-            ocr_backend=os.getenv("CUA_OCR_BACKEND", "paddleocr"),
+            ocr_backend=os.getenv("CUA_OCR_BACKEND", "none"),
             paddleocr_lang=os.getenv("CUA_PADDLE_OCR_LANG", "ch"),
             runtime_logs=_parse_bool(os.getenv("CUA_RUNTIME_LOGS"), True),
             runtime_preview_chars=_parse_int(os.getenv("CUA_RUNTIME_PREVIEW_CHARS"), 80),

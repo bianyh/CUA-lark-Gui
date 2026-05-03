@@ -31,6 +31,8 @@ class MockVisionPolicy(VisionPolicy):
         observation: Observation,
         history: Sequence[StepRecord],
         remaining_steps: int,
+        planning_hints: Sequence[ActionStep] | None = None,
+        latest_reflection: ReflectionResult | None = None,
     ) -> PolicyDecision:
         self.last_transport = "mock"
         if history:

@@ -24,6 +24,8 @@ class VisionPolicy(ABC):
         observation: Observation,
         history: Sequence[StepRecord],
         remaining_steps: int,
+        planning_hints: Sequence[ActionStep] | None = None,
+        latest_reflection: ReflectionResult | None = None,
     ) -> PolicyDecision:
         raise NotImplementedError
 

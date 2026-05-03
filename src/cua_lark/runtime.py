@@ -136,6 +136,12 @@ class RuntimeConsole:
             f"执行反思建议动作：{self._format_action(action)}",
         )
 
+    def replan(self, step_index: int, reflection: ReflectionResult) -> None:
+        self._emit(
+            f"重规划 {step_index}",
+            f"放弃重试当前动作，基于最新界面重新规划。策略：{self._trim(reflection.suggested_strategy)}",
+        )
+
     def loading_wait(self, step_index: int, wait_round: int, summary: str) -> None:
         self._emit(
             f"加载 {step_index}",

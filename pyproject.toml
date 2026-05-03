@@ -20,6 +20,7 @@ desktop = [
   "paddleocr>=3.0.0",
   "pyautogui>=0.9.54",
   "pygetwindow>=0.0.9",
+  "pyperclip>=1.9.0",
 ]
 dev = [
   "ruff>=0.11.0",
