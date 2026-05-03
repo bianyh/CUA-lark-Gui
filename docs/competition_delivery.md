@@ -75,6 +75,15 @@
 }
 ```
 
+坐标链路已经做了防偏移处理：
+
+- 默认使用 `CUA_COORDINATE_MODE=api_image`。
+- 模型坐标按“模型实际接收的图片尺寸”解释，而不是直接按桌面像素解释。
+- 执行前会根据 `source_image_size` 和 `screenshot_size` 把坐标还原到原始窗口截图坐标。
+- 执行器再加上飞书窗口左上角偏移，得到真实屏幕坐标。
+- Windows 端会启用 DPI awareness，减少 125%/150% 缩放下的偏移。
+- 如果模型返回 `metadata.normalized_coordinates`，执行器也支持归一化坐标换算。
+
 ### 多步骤复合操作
 
 `AgentRunner.run_task()` 串联完成：

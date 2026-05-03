@@ -20,7 +20,7 @@ from cua_lark.models import (
     ValidationResult,
 )
 from cua_lark.providers.base import VisionPolicy
-from cua_lark.utils.images import encode_image_as_data_url
+from cua_lark.utils.images import encode_image_as_data_url, resized_dimensions
 
 
 class OpenAICompatibleVisionPolicy(VisionPolicy):
@@ -60,6 +60,8 @@ class OpenAICompatibleVisionPolicy(VisionPolicy):
         raw = self._call_model(prompt, [observation.screenshot_path], detail="auto")
         data = self._extract_json(raw)
         action = ActionStep.from_dict(data["action"]) if isinstance(data.get("action"), dict) else None
+        if action is not None:
+            self._annotate_action_coordinates(action, observation)
         replan_reason = data.get("replan_reason")
         parsed_reason = ReplanReason(replan_reason) if replan_reason in ReplanReason._value2member_map_ else None
         return PolicyDecision(
@@ -263,6 +265,18 @@ class OpenAICompatibleVisionPolicy(VisionPolicy):
             value = value / 100.0
         return max(0.0, min(1.0, value))
 
+    def _annotate_action_coordinates(self, action: ActionStep, observation: Observation) -> None:
+        if action.coordinates is None:
+            return
+        original_size = tuple(int(item) for item in observation.screen_size)
+        max_side = self._settings.api_image_max_side
+        api_size = resized_dimensions(original_size, max_side)
+        action.metadata.setdefault("coordinate_mode", self._settings.coordinate_mode)
+        action.metadata.setdefault("source_image_size", list(api_size))
+        action.metadata.setdefault("screenshot_size", list(original_size))
+        action.metadata.setdefault("api_image_max_side", max_side)
+        action.metadata.setdefault("coordinate_source", "model")
+
     def _build_planning_prompt(
         self,
         task: TaskSpec,
@@ -311,6 +325,9 @@ Scripted hints are optional examples, not mandatory steps. Skip any hint that is
 When the latest reflection says replanning is needed, revise the strategy and avoid repeating the failed action unless the current observation strongly justifies it.
 For visible UI controls, prefer click/double_click with coordinates from the current screenshot when that is more reliable than a hotkey.
 Coordinates must be pixel coordinates relative to the provided screenshot/window image, not absolute desktop coordinates.
+The screenshot/window image size is {observation.screen_size[0]}x{observation.screen_size[1]} before upload.
+If image compression changes the transmitted size, return coordinates for the image you see; the executor will rescale them.
+If unsure, return normalized_coordinates as [x_ratio, y_ratio] between 0 and 1 in action.metadata.
 For hotkeys, return hotkey as an array such as ["ctrl","k"], never as one combined string.
 For Chinese or mixed-language input, use type_text with the exact text to paste.
 If the target chat is already open and the message box is visible, the next useful action is type_text with "Hello World"; do not keep clicking the same message box.

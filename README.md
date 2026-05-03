@@ -89,6 +89,18 @@ tests/                  Lightweight unit tests for the core loop
 - Desktop mode: Requires Windows, Feishu desktop client, `pyautogui`, `pygetwindow`, and `pyperclip`.
 - OCR is optional. The current default is no OCR because the vision model can read the screenshot directly and PaddleOCR may be unstable in some Windows conda environments.
 
+## Coordinate Accuracy
+
+Model click coordinates are treated as coordinates for the image sent to the model, not blindly as desktop pixels.
+
+- `CUA_COORDINATE_MODE=api_image` is the default.
+- The policy records the transmitted image size and the original screenshot size on each model-generated action.
+- The Windows executor rescales the point back to the original window screenshot before adding the window offset.
+- `metadata.normalized_coordinates=[x_ratio, y_ratio]` is also supported for models that return relative positions.
+- The Windows executor enables DPI awareness before importing `pyautogui`, reducing Windows display-scaling drift.
+
+If clicks still land off target, first check `execution_meta.screen_coordinates`, `execution_meta.window_region`, and the step screenshot in the generated `run.json`. Systematic proportional drift usually means image-size mapping; a constant offset usually means window frame/DPI/focus-region mismatch.
+
 ## Web Control Console
 
 The Flask console provides a browser UI for controlling the GUI agent.

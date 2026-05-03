@@ -56,6 +56,7 @@ class Settings:
     api_image_max_side: int = 1280
     api_multi_image_max_side: int = 960
     api_image_jpeg_quality: int = 75
+    coordinate_mode: str = "api_image"
 
     @classmethod
     def from_env(cls, repo_root: Path | None = None) -> "Settings":
@@ -85,6 +86,7 @@ class Settings:
             api_image_max_side=_parse_int(os.getenv("CUA_API_IMAGE_MAX_SIDE"), 1280),
             api_multi_image_max_side=_parse_int(os.getenv("CUA_API_MULTI_IMAGE_MAX_SIDE"), 960),
             api_image_jpeg_quality=_parse_int(os.getenv("CUA_API_IMAGE_JPEG_QUALITY"), 75),
+            coordinate_mode=os.getenv("CUA_COORDINATE_MODE", "api_image"),
         )
 
     def ensure_runtime_dirs(self) -> None:

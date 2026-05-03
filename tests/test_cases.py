@@ -26,6 +26,8 @@ from cua_lark.planning.hybrid import HybridPlanner
 from cua_lark.providers.mock import MockVisionPolicy
 from cua_lark.providers.openai_compatible import OpenAICompatibleVisionPolicy
 from cua_lark.runner import build_default_runner
+from cua_lark.executors.windows import WindowsDesktopExecutor
+from cua_lark.utils.images import resized_dimensions
 from cua_lark.web.app import create_app
 
 
@@ -114,6 +116,53 @@ class CaseLoaderTest(unittest.TestCase):
         self.assertAlmostEqual(provider._coerce_confidence("0.67"), 0.67)
         self.assertTrue(provider._coerce_bool("成功"))
         self.assertFalse(provider._coerce_bool("false"))
+
+    def test_model_coordinate_metadata_rescales_to_screenshot_size(self) -> None:
+        self.assertEqual(resized_dimensions((1384, 796), 1280), (1280, 736))
+
+        provider = OpenAICompatibleVisionPolicy.__new__(OpenAICompatibleVisionPolicy)
+        provider._settings = Settings(
+            repo_root=Path.cwd(),
+            artifact_root=Path("artifacts"),
+            report_root=Path("reports") / "generated",
+            openai_api_key="test",
+            api_image_max_side=1280,
+            coordinate_mode="api_image",
+        )
+        action = ActionStep(action_type="click", description="点击", coordinates=(265, 368))
+        observation = Observation(
+            screenshot_path="screen.png",
+            timestamp=datetime.now(UTC),
+            window_title="飞书",
+            screen_size=(1384, 796),
+        )
+
+        provider._annotate_action_coordinates(action, observation)
+        self.assertEqual(action.metadata["source_image_size"], [1280, 736])
+        self.assertEqual(action.metadata["screenshot_size"], [1384, 796])
+
+        executor = WindowsDesktopExecutor.__new__(WindowsDesktopExecutor)
+        mapped = executor._normalize_window_point(action.coordinates, action)
+        self.assertEqual(mapped, (287, 398))
+
+    def test_normalized_coordinates_map_to_window_size(self) -> None:
+        executor = WindowsDesktopExecutor.__new__(WindowsDesktopExecutor)
+
+        class FakePyAutoGui:
+            @staticmethod
+            def size() -> tuple[int, int]:
+                return (1920, 1080)
+
+        executor._pyautogui = FakePyAutoGui()
+        executor.capture_region = lambda: (100, 200, 800, 600)  # type: ignore[method-assign]
+        action = ActionStep(
+            action_type="click",
+            description="归一化点击",
+            coordinates=(0, 0),
+            metadata={"normalized_coordinates": [0.25, 0.5]},
+        )
+
+        self.assertEqual(executor._normalize_window_point(action.coordinates, action), (200, 300))
 
     def test_action_step_accepts_model_action_aliases(self) -> None:
         click = ActionStep.from_dict({"type": "click", "x": 115, "y": 85})

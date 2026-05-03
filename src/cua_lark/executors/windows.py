@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import ctypes
 import time
 from typing import Any
 
@@ -11,6 +12,7 @@ class WindowsDesktopExecutor(DesktopExecutor):
     backend_name = "windows_executor"
 
     def __init__(self) -> None:
+        self._enable_dpi_awareness()
         try:
             import pyautogui  # type: ignore
         except ImportError as exc:
@@ -133,12 +135,15 @@ class WindowsDesktopExecutor(DesktopExecutor):
 
     def _resolve_point(self, step: ActionStep) -> tuple[int, int] | None:
         if step.coordinates:
-            return self._window_to_screen(step.coordinates)
+            return self._window_to_screen(self._normalize_window_point(step.coordinates, step))
         if step.target and step.target.bbox:
-            return self._window_to_screen(step.target.bbox.center)
+            return self._window_to_screen(self._normalize_window_point(step.target.bbox.center, step))
         coords = step.metadata.get("coordinates")
         if isinstance(coords, (list, tuple)) and len(coords) == 2:
-            return self._window_to_screen((int(coords[0]), int(coords[1])))
+            return self._window_to_screen(self._normalize_window_point((int(coords[0]), int(coords[1])), step))
+        normalized = step.metadata.get("normalized_coordinates")
+        if isinstance(normalized, (list, tuple)) and len(normalized) == 2:
+            return self._window_to_screen(self._point_from_normalized(normalized))
         return None
 
     def _ensure_window_active(self) -> None:
@@ -157,6 +162,47 @@ class WindowsDesktopExecutor(DesktopExecutor):
             return None
         return (left, top, width, height)
 
+    def _normalize_window_point(self, point: tuple[int, int], step: ActionStep) -> tuple[int, int]:
+        normalized = step.metadata.get("normalized_coordinates")
+        if isinstance(normalized, (list, tuple)) and len(normalized) == 2:
+            return self._point_from_normalized(normalized)
+
+        coordinate_mode = str(step.metadata.get("coordinate_mode", "window"))
+        if coordinate_mode not in {"api_image", "source_image", "model_image"}:
+            return point
+
+        source_size = self._parse_size(step.metadata.get("source_image_size"))
+        screenshot_size = self._parse_size(step.metadata.get("screenshot_size"))
+        if source_size is None or screenshot_size is None:
+            return point
+        if source_size == screenshot_size:
+            return point
+        source_width, source_height = source_size
+        screenshot_width, screenshot_height = screenshot_size
+        if source_width <= 0 or source_height <= 0:
+            return point
+        scale_x = screenshot_width / source_width
+        scale_y = screenshot_height / source_height
+        return (round(point[0] * scale_x), round(point[1] * scale_y))
+
+    def _point_from_normalized(self, normalized: Any) -> tuple[int, int]:
+        region = self.capture_region()
+        if region is not None:
+            _, _, width, height = region
+        else:
+            width, height = self._pyautogui.size()
+        x_ratio = max(0.0, min(1.0, float(normalized[0])))
+        y_ratio = max(0.0, min(1.0, float(normalized[1])))
+        return (round(width * x_ratio), round(height * y_ratio))
+
+    def _parse_size(self, value: Any) -> tuple[int, int] | None:
+        if isinstance(value, (list, tuple)) and len(value) == 2:
+            width = int(float(value[0]))
+            height = int(float(value[1]))
+            if width > 0 and height > 0:
+                return (width, height)
+        return None
+
     def _window_to_screen(self, point: tuple[int, int]) -> tuple[int, int]:
         region = self.capture_region()
         if region is None:
@@ -170,6 +216,17 @@ class WindowsDesktopExecutor(DesktopExecutor):
             return None
         left, top, width, height = region
         return (left + int(width * 0.62), top + int(height * 0.86))
+
+    def _enable_dpi_awareness(self) -> None:
+        try:
+            ctypes.windll.shcore.SetProcessDpiAwareness(2)
+            return
+        except Exception:
+            pass
+        try:
+            ctypes.windll.user32.SetProcessDPIAware()
+        except Exception:
+            pass
 
     def _paste_text(self, text: str) -> None:
         if not text:

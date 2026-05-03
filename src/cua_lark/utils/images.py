@@ -7,6 +7,16 @@ from pathlib import Path
 from PIL import Image, ImageChops, ImageStat
 
 
+def resized_dimensions(size: tuple[int, int], max_side: int | None) -> tuple[int, int]:
+    if not max_side or max(size) <= max_side:
+        return size
+    ratio = max_side / float(max(size))
+    return (
+        max(1, int(size[0] * ratio)),
+        max(1, int(size[1] * ratio)),
+    )
+
+
 def encode_image_as_data_url(
     path: Path,
     *,
@@ -17,12 +27,8 @@ def encode_image_as_data_url(
     image.load()
     image = image.convert("RGB")
 
-    if max_side and max(image.size) > max_side:
-        ratio = max_side / float(max(image.size))
-        resized = (
-            max(1, int(image.size[0] * ratio)),
-            max(1, int(image.size[1] * ratio)),
-        )
+    resized = resized_dimensions(image.size, max_side)
+    if resized != image.size:
         image = image.resize(resized)
 
     buffer = BytesIO()

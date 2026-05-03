@@ -85,8 +85,11 @@
 坐标执行方式：
 
 - 模型输出 `coordinates: [x, y]` 或 `x/y`。
-- 坐标按截图窗口内位置解析。
-- 执行器根据飞书窗口左上角偏移转换成屏幕绝对坐标。
+- 默认 `CUA_COORDINATE_MODE=api_image`，模型坐标先按 API 实际接收的图片尺寸解释。
+- 策略层会在动作元数据中写入 `source_image_size`、`screenshot_size` 和 `coordinate_source`。
+- 执行器先把模型坐标从 API 图片尺寸换算回原始窗口截图尺寸，再根据飞书窗口左上角偏移转换成屏幕绝对坐标。
+- 如果模型返回 `metadata.normalized_coordinates: [x_ratio, y_ratio]`，执行器会优先按窗口宽高换算坐标。
+- Windows 执行器初始化时会启用 DPI awareness，降低系统缩放导致的截图坐标与鼠标坐标漂移。
 - 如果 `type_text` 没有坐标，执行器默认点击飞书窗口下方偏右的输入区域，再粘贴文本。
 
 ## 感知与 OCR
