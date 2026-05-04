@@ -311,6 +311,64 @@ class CaseLoaderTest(unittest.TestCase):
         self.assertTrue(child_info["active"])
         self.assertEqual(child_info["relative_region"], [260, 120, 520, 430])
 
+    def test_windows_executor_filters_invalid_huge_window_regions(self) -> None:
+        class FakeWindow:
+            def __init__(
+                self,
+                title: str,
+                left: int,
+                top: int,
+                width: int,
+                height: int,
+                minimized: bool = False,
+            ) -> None:
+                self.title = title
+                self.left = left
+                self.top = top
+                self.width = width
+                self.height = height
+                self.isMinimized = minimized
+
+        main = FakeWindow("飞书", 100, 100, 1000, 700)
+        huge = FakeWindow("飞书 - invalid", -500000, -500000, 900000, 900000)
+        child = FakeWindow("创建日程", 360, 220, 520, 430)
+
+        class FakeGW:
+            @staticmethod
+            def getWindowsWithTitle(keyword: str):
+                return [main, huge] if keyword == "飞书" else []
+
+            @staticmethod
+            def getActiveWindow():
+                return child
+
+            @staticmethod
+            def getAllWindows():
+                return [main, huge, child]
+
+        class FakePyAutoGui:
+            @staticmethod
+            def size() -> tuple[int, int]:
+                return (1920, 1080)
+
+        executor = WindowsDesktopExecutor.__new__(WindowsDesktopExecutor)
+        executor._gw = FakeGW()
+        executor._pyautogui = FakePyAutoGui()
+        executor._window_keyword = "飞书"
+        executor._window_region = None
+        executor._main_window_region = None
+        executor._active_context_region = None
+        executor._window_infos = []
+        executor._virtual_screen_region = lambda: (0, 0, 1920, 1080)  # type: ignore[method-assign]
+
+        region = executor.capture_region()
+
+        self.assertEqual(region, (100, 100, 1000, 700))
+        titles = [item["title"] for item in executor._window_infos]
+        self.assertIn("飞书", titles)
+        self.assertIn("创建日程", titles)
+        self.assertNotIn("飞书 - invalid", titles)
+
     def test_windows_executor_uses_last_capture_region_for_click_mapping(self) -> None:
         executor = WindowsDesktopExecutor.__new__(WindowsDesktopExecutor)
         executor._window_region = (100, 100, 1000, 700)
@@ -537,6 +595,22 @@ class MockRunnerTest(unittest.TestCase):
             )
             self.assertEqual(size, (640, 480))
             self.assertEqual(capture_mode, "mock")
+        finally:
+            if root.exists():
+                shutil.rmtree(root)
+
+    def test_screenshotter_rejects_oversized_region_before_capture(self) -> None:
+        root = Path("tests") / ".tmp" / "screenshotter_oversized"
+        if root.exists():
+            shutil.rmtree(root)
+        root.mkdir(parents=True, exist_ok=True)
+        try:
+            screenshotter = Screenshotter(mock_mode=False)
+            with self.assertRaisesRegex(RuntimeError, "Screenshot region is too large"):
+                screenshotter.capture(
+                    root / "oversized.png",
+                    region=(0, 0, 50000, 50000),
+                )
         finally:
             if root.exists():
                 shutil.rmtree(root)

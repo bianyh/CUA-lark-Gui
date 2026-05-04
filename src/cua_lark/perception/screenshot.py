@@ -7,6 +7,10 @@ from typing import Sequence
 from PIL import Image, ImageDraw, ImageGrab
 
 
+MAX_SCREENSHOT_PIXELS = 80_000_000
+MAX_SCREENSHOT_SIDE = 20_000
+
+
 class Screenshotter:
     def __init__(self, mock_mode: bool = False, mock_size: tuple[int, int] = (1440, 900)) -> None:
         self.mock_mode = mock_mode
@@ -33,10 +37,28 @@ class Screenshotter:
 
         if region is not None:
             left, top, width, height = region
+            self._validate_capture_size(width, height)
             image = ImageGrab.grab(bbox=(left, top, left + width, top + height))
             image.save(output_path)
             return output_path, image.size, "window"
 
         image = ImageGrab.grab(all_screens=True)
+        self._validate_capture_size(*image.size)
         image.save(output_path)
         return output_path, image.size, "full_screen"
+
+    def _validate_capture_size(self, width: int, height: int) -> None:
+        if width <= 0 or height <= 0:
+            raise RuntimeError(f"Invalid screenshot size: {width}x{height}.")
+        if width > MAX_SCREENSHOT_SIDE or height > MAX_SCREENSHOT_SIDE:
+            raise RuntimeError(
+                "Screenshot region is too large: "
+                f"{width}x{height}. This usually means an invalid desktop window region was detected."
+            )
+        pixels = width * height
+        if pixels > MAX_SCREENSHOT_PIXELS:
+            raise RuntimeError(
+                "Screenshot region is too large: "
+                f"{width}x{height} ({pixels} pixels). "
+                "This usually means an invalid desktop window region was detected."
+            )

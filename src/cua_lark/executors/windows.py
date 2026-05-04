@@ -8,6 +8,12 @@ from cua_lark.executors.base import DesktopExecutor
 from cua_lark.models import ActionStep
 
 
+MAX_CAPTURE_REGION_PIXELS = 80_000_000
+MAX_CAPTURE_REGION_SIDE = 20_000
+MIN_CAPTURE_WINDOW_WIDTH = 80
+MIN_CAPTURE_WINDOW_HEIGHT = 60
+
+
 class WindowsDesktopExecutor(DesktopExecutor):
     backend_name = "windows_executor"
 
@@ -222,6 +228,8 @@ class WindowsDesktopExecutor(DesktopExecutor):
         return (union_region, window_infos, active_context_region, main_region)
 
     def _region_from_window(self, window: Any) -> tuple[int, int, int, int] | None:
+        if window is None or self._is_minimized(window):
+            return None
         try:
             left = int(window.left)
             top = int(window.top)
@@ -231,7 +239,20 @@ class WindowsDesktopExecutor(DesktopExecutor):
             return None
         if width <= 0 or height <= 0:
             return None
-        return (left, top, width, height)
+        if width > MAX_CAPTURE_REGION_SIDE or height > MAX_CAPTURE_REGION_SIDE:
+            return None
+        if self._region_area((left, top, width, height)) > MAX_CAPTURE_REGION_PIXELS:
+            return None
+
+        clipped = self._clip_region_to_virtual_screen((left, top, width, height))
+        if clipped is None:
+            return None
+        _, _, clipped_width, clipped_height = clipped
+        if clipped_width < MIN_CAPTURE_WINDOW_WIDTH or clipped_height < MIN_CAPTURE_WINDOW_HEIGHT:
+            return None
+        if self._region_area(clipped) > MAX_CAPTURE_REGION_PIXELS:
+            return None
+        return clipped
 
     def _normalize_window_point(self, point: tuple[int, int], step: ActionStep) -> tuple[int, int]:
         normalized = step.metadata.get("normalized_coordinates")
@@ -394,7 +415,61 @@ class WindowsDesktopExecutor(DesktopExecutor):
         top = min(region[1] for region in regions)
         right = max(region[0] + region[2] for region in regions)
         bottom = max(region[1] + region[3] for region in regions)
+        union = (left, top, right - left, bottom - top)
+        if self._region_area(union) <= MAX_CAPTURE_REGION_PIXELS:
+            return union
+
+        virtual_region = self._virtual_screen_region()
+        clipped = self._intersection_region(union, virtual_region)
+        if clipped is not None and self._region_area(clipped) <= MAX_CAPTURE_REGION_PIXELS:
+            return clipped
+        return self._largest_region(regions)
+
+    def _clip_region_to_virtual_screen(
+        self,
+        region: tuple[int, int, int, int],
+    ) -> tuple[int, int, int, int] | None:
+        return self._intersection_region(region, self._virtual_screen_region())
+
+    def _virtual_screen_region(self) -> tuple[int, int, int, int]:
+        try:
+            user32 = ctypes.windll.user32
+            left = int(user32.GetSystemMetrics(76))
+            top = int(user32.GetSystemMetrics(77))
+            width = int(user32.GetSystemMetrics(78))
+            height = int(user32.GetSystemMetrics(79))
+            if width > 0 and height > 0:
+                return (left, top, width, height)
+        except Exception:
+            pass
+
+        pyautogui = getattr(self, "_pyautogui", None)
+        if pyautogui is not None:
+            try:
+                width, height = pyautogui.size()
+                width = int(width)
+                height = int(height)
+                if width > 0 and height > 0:
+                    return (0, 0, width, height)
+            except Exception:
+                pass
+        return (-10_000, -10_000, 20_000, 20_000)
+
+    def _intersection_region(
+        self,
+        a: tuple[int, int, int, int],
+        b: tuple[int, int, int, int],
+    ) -> tuple[int, int, int, int] | None:
+        left = max(a[0], b[0])
+        top = max(a[1], b[1])
+        right = min(a[0] + a[2], b[0] + b[2])
+        bottom = min(a[1] + a[3], b[1] + b[3])
+        if right <= left or bottom <= top:
+            return None
         return (left, top, right - left, bottom - top)
+
+    def _region_area(self, region: tuple[int, int, int, int]) -> int:
+        return max(0, region[2]) * max(0, region[3])
 
     def _center(self, region: tuple[int, int, int, int]) -> tuple[int, int]:
         left, top, width, height = region
