@@ -93,6 +93,16 @@ class RuntimeConsole:
             f"开始第 {attempt}/{max_attempts} 次尝试，动作={self._format_action(action)}",
         )
 
+    def window_handoff(self, step_index: int, window_info: dict[str, Any]) -> None:
+        title = self._trim(str(window_info.get("title", "")))
+        process_name = self._trim(str(window_info.get("process_name", "")))
+        region = window_info.get("region", "")
+        target_type = self._trim(str(window_info.get("handoff_type", "external")))
+        self._emit(
+            f"窗口切换 {step_index}",
+            f"检测到 `{target_type}` 上下文，进程=`{process_name or 'unknown'}`，窗口=`{title}`，区域={region}",
+        )
+
     def execution_result(
         self,
         step_index: int,

@@ -70,6 +70,7 @@ class AgentRunner:
         report_dir.mkdir(parents=True, exist_ok=True)
 
         window_keyword = str(task.metadata.get("window_title_keyword", self.settings.window_title_keyword))
+        self.executor.configure_window_handoff(task.metadata)
         focus_result = self.executor.focus_window(window_keyword)
         self.runtime_console.task_start(
             task=task,
@@ -171,6 +172,10 @@ class AgentRunner:
                     execution_meta = self.executor.execute(decision.action)
                 except Exception as exc:
                     error_message = str(exc)
+                if error_message is None:
+                    handoff = self._refresh_window_context(step_index, wait_seconds=3.0)
+                    if handoff is not None:
+                        execution_meta["window_handoff"] = handoff
 
                 raw_after = self._observe(
                     screenshot_path=timeline_dir / f"{step_index:02d}_attempt{attempt}_after.png",
@@ -556,6 +561,9 @@ class AgentRunner:
                 action.action_type == "hotkey" and action.hotkey
             ):
                 recovery_meta.update(self.executor.execute(action))
+                handoff = self._refresh_window_context(step_index, wait_seconds=1.0)
+                if handoff is not None:
+                    recovery_meta["recovery_window_handoff"] = handoff
         except Exception as exc:
             recovery_meta["recovery_error"] = str(exc)
 
@@ -626,6 +634,13 @@ class AgentRunner:
             if record.action.action_type in {"click", "double_click"} and record.action.coordinates is not None
         ]
         return len(recent_clicks) >= 2
+
+    def _refresh_window_context(self, step_index: int, wait_seconds: float = 0.0) -> dict[str, object] | None:
+        handoff = self.executor.refresh_window_context(wait_seconds=wait_seconds)
+        if handoff is None:
+            return None
+        self.runtime_console.window_handoff(step_index, handoff)
+        return dict(handoff)
 
     def _maybe_rewrite_redundant_form_click(
         self,

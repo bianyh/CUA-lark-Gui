@@ -19,6 +19,12 @@ class DesktopExecutor(ABC):
     def snapshot_state(self) -> dict[str, Any]:
         return {}
 
+    def configure_window_handoff(self, metadata: dict[str, Any]) -> None:
+        return None
+
+    def refresh_window_context(self, wait_seconds: float = 0.0) -> dict[str, Any] | None:
+        return None
+
     def reset(self) -> None:
         return None
 

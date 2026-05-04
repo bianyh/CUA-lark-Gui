@@ -23,6 +23,19 @@ tags:
   - mvp
 metadata:
   window_title_keyword: 飞书
+  allow_window_handoff: true
+  handoff_targets:
+    - type: browser
+      processes: [chrome.exe, msedge.exe, firefox.exe]
+      title_keywords:
+        - 云文档
+        - 文档
+        - Docs
+        - Lark
+        - docs.feishu.cn
+        - feishu.cn
+        - 项目周报
+        - 2026年Q2项目进展
   scripted_actions:
     - action_type: hotkey
       description: 打开全局搜索

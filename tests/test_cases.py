@@ -369,6 +369,76 @@ class CaseLoaderTest(unittest.TestCase):
         self.assertIn("创建日程", titles)
         self.assertNotIn("飞书 - invalid", titles)
 
+    def test_windows_executor_switches_to_browser_handoff_context(self) -> None:
+        class FakeWindow:
+            def __init__(
+                self,
+                title: str,
+                left: int,
+                top: int,
+                width: int,
+                height: int,
+            ) -> None:
+                self.title = title
+                self.left = left
+                self.top = top
+                self.width = width
+                self.height = height
+                self.isMinimized = False
+
+        main = FakeWindow("飞书", 100, 100, 1000, 700)
+
+        class FakeGW:
+            @staticmethod
+            def getWindowsWithTitle(keyword: str):
+                return [main] if keyword == "飞书" else []
+
+            @staticmethod
+            def getActiveWindow():
+                return main
+
+            @staticmethod
+            def getAllWindows():
+                return [main]
+
+        executor = WindowsDesktopExecutor.__new__(WindowsDesktopExecutor)
+        executor._gw = FakeGW()
+        executor._window_keyword = "飞书"
+        executor._window_region = None
+        executor._main_window_region = None
+        executor._active_context_region = None
+        executor._window_infos = []
+        executor._active_external_context = None
+        executor.configure_window_handoff(
+            {
+                "allow_window_handoff": True,
+                "handoff_targets": [
+                    {
+                        "type": "browser",
+                        "processes": ["chrome.exe"],
+                        "title_keywords": ["云文档", "项目周报"],
+                    }
+                ],
+            }
+        )
+        executor._foreground_window_info = lambda: {  # type: ignore[method-assign]
+            "title": "项目周报 - 飞书云文档 - Google Chrome",
+            "role": "external_active",
+            "active": True,
+            "process_name": "chrome.exe",
+            "region": [300, 120, 1200, 820],
+            "relative_region": [0, 0, 1200, 820],
+        }
+
+        handoff = executor.refresh_window_context()
+
+        self.assertIsNotNone(handoff)
+        self.assertEqual(handoff["handoff_type"], "browser")
+        self.assertEqual(executor.capture_region(), (300, 120, 1200, 820))
+        state = executor.snapshot_state()
+        self.assertEqual(state["active_window_context"]["process_name"], "chrome.exe")
+        self.assertEqual(state["window_candidates"][0]["role"], "handoff_target")
+
     def test_windows_executor_uses_last_capture_region_for_click_mapping(self) -> None:
         executor = WindowsDesktopExecutor.__new__(WindowsDesktopExecutor)
         executor._window_region = (100, 100, 1000, 700)
@@ -818,6 +888,137 @@ class MockRunnerTest(unittest.TestCase):
             self.assertIn("recovery", policy.second_observation_path)
             self.assertEqual(len(report.step_records), 1)
             self.assertEqual(report.metrics["replans"], 1)
+        finally:
+            if root.exists():
+                shutil.rmtree(root)
+
+    def test_runner_configures_and_records_window_handoff(self) -> None:
+        class HandoffExecutor:
+            backend_name = "handoff_executor"
+
+            def __init__(self) -> None:
+                self.metadata_seen: dict[str, object] = {}
+                self.refresh_calls = 0
+                self.visible_texts: list[str] = []
+
+            def reset(self) -> None:
+                return None
+
+            def configure_window_handoff(self, metadata: dict[str, object]) -> None:
+                self.metadata_seen = dict(metadata)
+
+            def focus_window(self, keyword: str) -> bool:
+                self.visible_texts.append(keyword)
+                return True
+
+            def execute(self, step: ActionStep) -> dict[str, object]:
+                if step.text:
+                    self.visible_texts.append(step.text)
+                return {"mode": "handoff"}
+
+            def refresh_window_context(self, wait_seconds: float = 0.0) -> dict[str, object] | None:
+                self.refresh_calls += 1
+                if self.refresh_calls == 1:
+                    return {
+                        "title": "项目周报 - 飞书云文档 - Google Chrome",
+                        "process_name": "chrome.exe",
+                        "region": [300, 120, 1200, 820],
+                        "handoff_type": "browser",
+                    }
+                return None
+
+            def snapshot_state(self) -> dict[str, object]:
+                return {
+                    "visible_texts": list(self.visible_texts),
+                    "active_window_context": {
+                        "title": "项目周报 - 飞书云文档 - Google Chrome",
+                        "process_name": "chrome.exe",
+                        "region": [300, 120, 1200, 820],
+                    },
+                    "window_candidates": [
+                        {
+                            "title": "项目周报 - 飞书云文档 - Google Chrome",
+                            "role": "handoff_target",
+                            "active": True,
+                        }
+                    ],
+                }
+
+            def capture_region(self) -> tuple[int, int, int, int]:
+                return (300, 120, 1200, 820)
+
+        class OneStepPolicy(MockVisionPolicy):
+            def __init__(self) -> None:
+                super().__init__()
+                self.calls = 0
+
+            def plan_next_action(
+                self,
+                task: TaskSpec,
+                observation: Observation,
+                history: list[StepRecord],
+                remaining_steps: int,
+                planning_hints: list[ActionStep] | None = None,
+                latest_reflection: ReflectionResult | None = None,
+            ) -> PolicyDecision:
+                self.calls += 1
+                if self.calls == 1:
+                    return PolicyDecision(
+                        done=False,
+                        rationale="触发云文档跳转。",
+                        action=ActionStep(
+                            action_type="type_text",
+                            description="输入文档名",
+                            text="项目周报",
+                            validation_hint="项目周报",
+                        ),
+                    )
+                return PolicyDecision(done=True, rationale="已捕捉浏览器上下文。")
+
+        root = Path("tests") / ".tmp" / "runner_handoff"
+        if root.exists():
+            shutil.rmtree(root)
+        root.mkdir(parents=True, exist_ok=True)
+        try:
+            settings = Settings(
+                repo_root=root,
+                artifact_root=root / "artifacts",
+                report_root=root / "reports" / "generated",
+                openai_api_key=None,
+                mock_mode=True,
+                max_steps=2,
+                max_retries=0,
+            )
+            task = TaskSpec(
+                id="docs_handoff_case",
+                product="docs",
+                instruction="创建项目周报文档。",
+                metadata={
+                    "window_title_keyword": "飞书",
+                    "allow_window_handoff": True,
+                    "handoff_targets": [
+                        {
+                            "type": "browser",
+                            "processes": ["chrome.exe"],
+                            "title_keywords": ["云文档"],
+                        }
+                    ],
+                },
+            )
+            executor = HandoffExecutor()
+            runner = build_default_runner(settings)
+            runner.executor = executor  # type: ignore[assignment]
+            runner.planner = HybridPlanner(policy=OneStepPolicy(), prefer_scripted=False)
+
+            report = runner.run_task(task)
+
+            self.assertTrue(executor.metadata_seen["allow_window_handoff"])
+            self.assertGreaterEqual(executor.refresh_calls, 1)
+            self.assertEqual(report.step_records[0].execution_meta["window_handoff"]["process_name"], "chrome.exe")
+            self.assertEqual(
+                report.step_records[0].executor_state["active_window_context"]["process_name"],
+                "chrome.exe",
+            )
         finally:
             if root.exists():
                 shutil.rmtree(root)

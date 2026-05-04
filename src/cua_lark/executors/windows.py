@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import ctypes
+from ctypes import wintypes
+from pathlib import Path
 import time
 from typing import Any
 
@@ -12,6 +14,16 @@ MAX_CAPTURE_REGION_PIXELS = 80_000_000
 MAX_CAPTURE_REGION_SIDE = 20_000
 MIN_CAPTURE_WINDOW_WIDTH = 80
 MIN_CAPTURE_WINDOW_HEIGHT = 60
+DEFAULT_BROWSER_PROCESSES = {"chrome.exe", "msedge.exe", "firefox.exe", "browser.exe"}
+DEFAULT_DOCS_TITLE_KEYWORDS = {
+    "Lark",
+    "Docs",
+    "云文档",
+    "文档",
+    "docs.feishu.cn",
+    "feishu.cn",
+    "larksuite.com",
+}
 
 
 class WindowsDesktopExecutor(DesktopExecutor):
@@ -40,9 +52,22 @@ class WindowsDesktopExecutor(DesktopExecutor):
         self._main_window_region: tuple[int, int, int, int] | None = None
         self._active_context_region: tuple[int, int, int, int] | None = None
         self._window_infos: list[dict[str, Any]] = []
+        self._active_external_context: dict[str, Any] | None = None
+        self._handoff_enabled = False
+        self._handoff_targets: list[dict[str, Any]] = []
+
+    def reset(self) -> None:
+        self._window_region = None
+        self._main_window_region = None
+        self._active_context_region = None
+        self._window_infos = []
+        self._active_external_context = None
+        self._handoff_enabled = False
+        self._handoff_targets = []
 
     def focus_window(self, keyword: str) -> bool:
         self._window_keyword = keyword
+        self._active_external_context = None
         if not self._gw:
             return False
         candidates = self._gw.getWindowsWithTitle(keyword)
@@ -62,6 +87,14 @@ class WindowsDesktopExecutor(DesktopExecutor):
             return False
 
     def capture_region(self) -> tuple[int, int, int, int] | None:
+        active_external_context = getattr(self, "_active_external_context", None)
+        if active_external_context is not None:
+            region = self._parse_region(active_external_context.get("region"))
+            if region is not None:
+                self._window_region = region
+                self._active_context_region = region
+                self._window_infos = [dict(active_external_context)]
+                return region
         if not self._gw or not self._window_keyword:
             return None
         context = self._discover_window_context()
@@ -86,9 +119,31 @@ class WindowsDesktopExecutor(DesktopExecutor):
             state["active_context_region"] = list(self._active_context_region)
         if self._window_infos:
             state["window_candidates"] = self._window_infos
+        active_external_context = getattr(self, "_active_external_context", None)
+        if active_external_context is not None:
+            state["active_window_context"] = dict(active_external_context)
         if self._window_keyword:
             state["focused_window_keyword"] = self._window_keyword
         return state
+
+    def configure_window_handoff(self, metadata: dict[str, Any]) -> None:
+        self._handoff_enabled = bool(metadata.get("allow_window_handoff", False))
+        raw_targets = metadata.get("handoff_targets")
+        self._handoff_targets = list(raw_targets) if isinstance(raw_targets, list) else []
+
+    def refresh_window_context(self, wait_seconds: float = 0.0) -> dict[str, Any] | None:
+        if not getattr(self, "_handoff_enabled", False):
+            return None
+        deadline = time.monotonic() + max(0.0, wait_seconds)
+        while True:
+            window_info = self._foreground_window_info()
+            handoff = self._match_handoff_target(window_info)
+            if handoff is not None:
+                self._activate_external_context(handoff)
+                return handoff
+            if time.monotonic() >= deadline:
+                return None
+            time.sleep(0.2)
 
     def execute(self, step: ActionStep) -> dict[str, Any]:
         pyautogui = self._pyautogui
@@ -166,6 +221,8 @@ class WindowsDesktopExecutor(DesktopExecutor):
         return None
 
     def _ensure_window_active(self) -> None:
+        if getattr(self, "_active_external_context", None) is not None:
+            return
         if self._window_region is not None:
             return
         if self._window_keyword:
@@ -253,6 +310,230 @@ class WindowsDesktopExecutor(DesktopExecutor):
         if self._region_area(clipped) > MAX_CAPTURE_REGION_PIXELS:
             return None
         return clipped
+
+    def _foreground_window_info(self) -> dict[str, Any] | None:
+        try:
+            user32 = ctypes.windll.user32
+            user32.GetForegroundWindow.restype = wintypes.HWND
+            hwnd = int(user32.GetForegroundWindow())
+        except Exception:
+            return self._pygetwindow_active_info()
+        if not hwnd:
+            return self._pygetwindow_active_info()
+
+        title = self._window_title_from_hwnd(hwnd)
+        region = self._region_from_hwnd(hwnd)
+        if region is None:
+            return self._pygetwindow_active_info()
+        process_id = self._process_id_from_hwnd(hwnd)
+        process_name = self._process_name(process_id) if process_id is not None else ""
+        return self._context_info(
+            title=title,
+            region=region,
+            role="external_active",
+            active=True,
+            hwnd=hwnd,
+            process_id=process_id,
+            process_name=process_name,
+        )
+
+    def _pygetwindow_active_info(self) -> dict[str, Any] | None:
+        window = self._active_window()
+        region = self._region_from_window(window) if window is not None else None
+        if window is None or region is None:
+            return None
+        return self._context_info(
+            title=str(getattr(window, "title", "") or ""),
+            region=region,
+            role="external_active",
+            active=True,
+        )
+
+    def _context_info(
+        self,
+        title: str,
+        region: tuple[int, int, int, int],
+        role: str,
+        active: bool,
+        hwnd: int | None = None,
+        process_id: int | None = None,
+        process_name: str = "",
+    ) -> dict[str, Any]:
+        info: dict[str, Any] = {
+            "title": title,
+            "role": role,
+            "active": active,
+            "region": list(region),
+            "relative_region": [0, 0, region[2], region[3]],
+        }
+        if hwnd is not None:
+            info["hwnd"] = hwnd
+        if process_id is not None:
+            info["process_id"] = process_id
+        if process_name:
+            info["process_name"] = process_name
+        return info
+
+    def _match_handoff_target(self, window_info: dict[str, Any] | None) -> dict[str, Any] | None:
+        if window_info is None:
+            return None
+        region = self._parse_region(window_info.get("region"))
+        if region is None:
+            return None
+        title = str(window_info.get("title", "") or "")
+        process_name = str(window_info.get("process_name", "") or "").lower()
+
+        targets = getattr(self, "_handoff_targets", []) or [{"type": "browser"}]
+        for target in targets:
+            if not isinstance(target, dict):
+                continue
+            if not self._matches_target_process(process_name, target):
+                continue
+            if not self._matches_target_title(title, target):
+                continue
+            handoff = dict(window_info)
+            handoff["role"] = "handoff_target"
+            handoff["active"] = True
+            handoff["handoff_type"] = str(target.get("type", "browser"))
+            handoff["relative_region"] = [0, 0, region[2], region[3]]
+            return handoff
+        return None
+
+    def _matches_target_process(self, process_name: str, target: dict[str, Any]) -> bool:
+        configured = target.get("processes")
+        processes = (
+            {str(item).strip().lower() for item in configured if str(item).strip()}
+            if isinstance(configured, list)
+            else DEFAULT_BROWSER_PROCESSES
+        )
+        target_type = str(target.get("type", "browser")).lower()
+        if target_type == "browser":
+            return not process_name or process_name in processes
+        return not processes or process_name in processes
+
+    def _matches_target_title(self, title: str, target: dict[str, Any]) -> bool:
+        configured = target.get("title_keywords")
+        keywords = (
+            [str(item).strip() for item in configured if str(item).strip()]
+            if isinstance(configured, list)
+            else list(DEFAULT_DOCS_TITLE_KEYWORDS)
+        )
+        if not keywords:
+            return True
+        title_lower = title.lower()
+        return any(keyword.lower() in title_lower for keyword in keywords)
+
+    def _activate_external_context(self, window_info: dict[str, Any]) -> None:
+        region = self._parse_region(window_info.get("region"))
+        if region is None:
+            return
+        context = dict(window_info)
+        context["role"] = str(context.get("role", "handoff_target"))
+        context["active"] = True
+        context["region"] = list(region)
+        context["relative_region"] = [0, 0, region[2], region[3]]
+        self._active_external_context = context
+        self._window_region = region
+        self._active_context_region = region
+        self._window_infos = [context]
+
+    def _window_title_from_hwnd(self, hwnd: int) -> str:
+        try:
+            user32 = ctypes.windll.user32
+            user32.GetWindowTextLengthW.argtypes = [wintypes.HWND]
+            user32.GetWindowTextLengthW.restype = ctypes.c_int
+            length = int(user32.GetWindowTextLengthW(hwnd))
+            buffer = ctypes.create_unicode_buffer(length + 1)
+            user32.GetWindowTextW.argtypes = [wintypes.HWND, wintypes.LPWSTR, ctypes.c_int]
+            user32.GetWindowTextW.restype = ctypes.c_int
+            user32.GetWindowTextW(hwnd, buffer, length + 1)
+            return buffer.value
+        except Exception:
+            return ""
+
+    def _region_from_hwnd(self, hwnd: int) -> tuple[int, int, int, int] | None:
+        try:
+            rect = wintypes.RECT()
+            ctypes.windll.user32.GetWindowRect.argtypes = [wintypes.HWND, ctypes.POINTER(wintypes.RECT)]
+            ctypes.windll.user32.GetWindowRect.restype = wintypes.BOOL
+            if not ctypes.windll.user32.GetWindowRect(hwnd, ctypes.byref(rect)):
+                return None
+            return self._sanitize_region(
+                (int(rect.left), int(rect.top), int(rect.right - rect.left), int(rect.bottom - rect.top))
+            )
+        except Exception:
+            return None
+
+    def _process_id_from_hwnd(self, hwnd: int) -> int | None:
+        try:
+            pid = wintypes.DWORD()
+            ctypes.windll.user32.GetWindowThreadProcessId.argtypes = [
+                wintypes.HWND,
+                ctypes.POINTER(wintypes.DWORD),
+            ]
+            ctypes.windll.user32.GetWindowThreadProcessId.restype = wintypes.DWORD
+            ctypes.windll.user32.GetWindowThreadProcessId(hwnd, ctypes.byref(pid))
+            return int(pid.value) if pid.value else None
+        except Exception:
+            return None
+
+    def _process_name(self, process_id: int | None) -> str:
+        if process_id is None:
+            return ""
+        try:
+            kernel32 = ctypes.windll.kernel32
+            kernel32.OpenProcess.argtypes = [wintypes.DWORD, wintypes.BOOL, wintypes.DWORD]
+            kernel32.OpenProcess.restype = wintypes.HANDLE
+            handle = kernel32.OpenProcess(0x1000 | 0x0400, False, process_id)
+            if not handle:
+                return ""
+            try:
+                buffer = ctypes.create_unicode_buffer(260)
+                size = wintypes.DWORD(len(buffer))
+                query = getattr(kernel32, "QueryFullProcessImageNameW", None)
+                if query is not None:
+                    query.argtypes = [
+                        wintypes.HANDLE,
+                        wintypes.DWORD,
+                        wintypes.LPWSTR,
+                        ctypes.POINTER(wintypes.DWORD),
+                    ]
+                    query.restype = wintypes.BOOL
+                if query is None or not query(handle, 0, buffer, ctypes.byref(size)):
+                    return ""
+                return Path(buffer.value).name.lower()
+            finally:
+                kernel32.CloseHandle.argtypes = [wintypes.HANDLE]
+                kernel32.CloseHandle.restype = wintypes.BOOL
+                kernel32.CloseHandle(handle)
+        except Exception:
+            return ""
+
+    def _sanitize_region(self, region: tuple[int, int, int, int]) -> tuple[int, int, int, int] | None:
+        left, top, width, height = region
+        if width <= 0 or height <= 0:
+            return None
+        if width > MAX_CAPTURE_REGION_SIDE or height > MAX_CAPTURE_REGION_SIDE:
+            return None
+        if self._region_area((left, top, width, height)) > MAX_CAPTURE_REGION_PIXELS:
+            return None
+
+        clipped = self._clip_region_to_virtual_screen((left, top, width, height))
+        if clipped is None:
+            return None
+        _, _, clipped_width, clipped_height = clipped
+        if clipped_width < MIN_CAPTURE_WINDOW_WIDTH or clipped_height < MIN_CAPTURE_WINDOW_HEIGHT:
+            return None
+        if self._region_area(clipped) > MAX_CAPTURE_REGION_PIXELS:
+            return None
+        return clipped
+
+    def _parse_region(self, value: Any) -> tuple[int, int, int, int] | None:
+        if isinstance(value, (list, tuple)) and len(value) == 4:
+            region = (int(value[0]), int(value[1]), int(value[2]), int(value[3]))
+            if region[2] > 0 and region[3] > 0:
+                return region
+        return None
 
     def _normalize_window_point(self, point: tuple[int, int], step: ActionStep) -> tuple[int, int]:
         normalized = step.metadata.get("normalized_coordinates")

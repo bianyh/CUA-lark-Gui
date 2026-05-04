@@ -22,6 +22,7 @@ class MockDesktopExecutor(DesktopExecutor):
             "last_typed_text": "",
             "last_hotkey": [],
             "focused_window": "",
+            "window_handoff": None,
         }
 
     def focus_window(self, keyword: str) -> bool:
@@ -64,7 +65,14 @@ class MockDesktopExecutor(DesktopExecutor):
             "sent_messages": list(self._state["sent_messages"]),
             "last_hotkey": list(self._state["last_hotkey"]),
             "focused_window": str(self._state["focused_window"]),
+            "window_handoff": self._state.get("window_handoff"),
         }
+
+    def configure_window_handoff(self, metadata: dict[str, Any]) -> None:
+        self._state["window_handoff_config"] = dict(metadata)
+
+    def refresh_window_context(self, wait_seconds: float = 0.0) -> dict[str, Any] | None:
+        return None
 
     def _add_visible_text(self, value: str) -> None:
         if value and value not in self._state["visible_texts"]:
