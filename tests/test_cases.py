@@ -25,7 +25,7 @@ from cua_lark.perception.state import StateAnalyzer
 from cua_lark.planning.hybrid import HybridPlanner
 from cua_lark.providers.mock import MockVisionPolicy
 from cua_lark.providers.openai_compatible import OpenAICompatibleVisionPolicy
-from cua_lark.runner import build_default_runner
+from cua_lark.runner import AgentRunner, build_default_runner
 from cua_lark.executors.windows import WindowsDesktopExecutor
 from cua_lark.utils.images import resized_dimensions
 from cua_lark.web.app import create_app
@@ -134,6 +134,84 @@ class CaseLoaderTest(unittest.TestCase):
         wrapped = '[{"success": true, "completion_score": 1.0}] trailing text'
         data = provider._extract_json(wrapped)
         self.assertTrue(data["success"])
+
+    def test_openai_planning_prompt_includes_action_memory(self) -> None:
+        provider = OpenAICompatibleVisionPolicy.__new__(OpenAICompatibleVisionPolicy)
+        task = TaskSpec(
+            id="calendar_prompt_memory",
+            product="calendar",
+            instruction="打开飞书日历，创建一个主题为“项目周会”的会议。",
+        )
+        observation = Observation(
+            screenshot_path="calendar.png",
+            timestamp=datetime.now(UTC),
+            window_title="飞书",
+            screen_size=(1218, 859),
+            notes=["创建日程", "添加主题"],
+            ui_hints={
+                "window_candidates": [
+                    {"title": "创建日程", "role": "active_child", "active": True}
+                ]
+            },
+        )
+        before = Observation(
+            screenshot_path="before.png",
+            timestamp=datetime.now(UTC),
+            window_title="飞书",
+            screen_size=(1218, 859),
+        )
+        history = [
+            StepRecord(
+                index=3,
+                attempt=1,
+                action=ActionStep(
+                    action_type="click",
+                    description="点击标题输入框",
+                    coordinates=(122, 75),
+                ),
+                success=False,
+                rationale="聚焦标题输入框",
+                started_at=datetime.now(UTC),
+                ended_at=datetime.now(UTC),
+                observation_before=before,
+                observation_after=observation,
+                validation=ValidationResult(
+                    passed=False,
+                    summary="动作执行后任务进度未提升。",
+                    strategy="progress_stall",
+                    confidence=0.7,
+                ),
+                progress_assessment=ProgressAssessment(
+                    success=False,
+                    completion_score=0.28,
+                    progress_label="已打开新建会议窗口",
+                    summary="标题仍未输入。",
+                    confidence=0.8,
+                ),
+                reflection=ReflectionResult(
+                    should_replan=True,
+                    root_cause="反复点击同一输入框，没有输入内容。",
+                    failure_stage="输入阶段",
+                    suggested_strategy="改为直接输入会议主题。",
+                    confidence=0.9,
+                ),
+                execution_meta={"screen_coordinates": [856, 403]},
+            )
+        ]
+
+        prompt = provider._build_planning_prompt(
+            task=task,
+            observation=observation,
+            history=history,
+            remaining_steps=6,
+        )
+
+        self.assertIn("coords=(122, 75)", prompt)
+        self.assertIn("screen=(856, 403)", prompt)
+        self.assertIn("validation=progress_stall", prompt)
+        self.assertIn("progress=0.28/已打开新建会议窗口", prompt)
+        self.assertIn("root=反复点击同一输入框", prompt)
+        self.assertIn("Detected interaction patterns", prompt)
 
     def test_model_coordinate_metadata_rescales_to_screenshot_size(self) -> None:
         self.assertEqual(resized_dimensions((1384, 796), 1280), (1280, 736))
@@ -367,6 +445,83 @@ class CaseLoaderTest(unittest.TestCase):
 
 
 class MockRunnerTest(unittest.TestCase):
+    def test_runner_rewrites_repeated_calendar_form_click_to_title_input(self) -> None:
+        runner = AgentRunner.__new__(AgentRunner)
+        task = TaskSpec(
+            id="calendar_rewrite_case",
+            product="calendar",
+            instruction="打开飞书日历，创建一个主题为“项目周会”的会议，时间为明天下午 2 点。",
+        )
+        observation = Observation(
+            screenshot_path="calendar.png",
+            timestamp=datetime.now(UTC),
+            window_title="飞书",
+            screen_size=(1218, 859),
+            notes=["创建日程", "添加主题"],
+            ui_hints={
+                "window_candidates": [
+                    {"title": "创建日程", "role": "active_child", "active": True}
+                ]
+            },
+        )
+        before = Observation(
+            screenshot_path="before.png",
+            timestamp=datetime.now(UTC),
+            window_title="飞书",
+            screen_size=(1218, 859),
+        )
+        history = [
+            StepRecord(
+                index=index,
+                attempt=1,
+                action=ActionStep(
+                    action_type="click",
+                    description="点击标题输入框",
+                    coordinates=coordinates,
+                ),
+                success=False,
+                rationale="尝试聚焦标题输入框",
+                started_at=datetime.now(UTC),
+                ended_at=datetime.now(UTC),
+                observation_before=before,
+                observation_after=observation,
+                validation=ValidationResult(
+                    passed=False,
+                    summary="动作执行后任务进度未提升。",
+                    strategy="progress_stall",
+                    confidence=0.8,
+                ),
+                progress_assessment=ProgressAssessment(
+                    success=False,
+                    completion_score=0.3,
+                    progress_label="已打开新建会议窗口",
+                    summary="仍未输入会议主题。",
+                    confidence=0.8,
+                ),
+            )
+            for index, coordinates in [(3, (122, 75)), (4, (127, 72))]
+        ]
+        action = ActionStep(
+            action_type="click",
+            description="再次点击标题输入框",
+            coordinates=(126, 73),
+        )
+
+        rewritten = runner._maybe_rewrite_redundant_form_click(
+            task=task,
+            observation=observation,
+            history=history,
+            action=action,
+        )
+
+        self.assertEqual(rewritten.action_type, "type_text")
+        self.assertEqual(rewritten.text, "项目周会")
+        self.assertEqual(rewritten.validation_hint, "项目周会")
+        self.assertEqual(
+            rewritten.metadata["rewrite_reason"],
+            "calendar_repeated_form_click_to_title_input",
+        )
+
     def test_mock_screenshotter_respects_region_size(self) -> None:
         root = Path("tests") / ".tmp" / "screenshotter"
         if root.exists():

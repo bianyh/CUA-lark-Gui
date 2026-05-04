@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from datetime import UTC, datetime
 from pathlib import Path
+import re
 import time
 from typing import Callable
 
@@ -10,6 +11,7 @@ from cua_lark.executors.base import DesktopExecutor
 from cua_lark.executors.mock import MockDesktopExecutor
 from cua_lark.executors.windows import WindowsDesktopExecutor
 from cua_lark.models import (
+    ActionStep,
     Observation,
     ReflectionResult,
     ReplanReason,
@@ -115,6 +117,24 @@ class AgentRunner:
                 latest_reflection=latest_reflection,
             )
             decision = planning.decision
+            if not planning.scripted and not decision.done and decision.action is not None:
+                original_action = decision.action
+                rewritten_action = self._maybe_rewrite_redundant_form_click(
+                    task=task,
+                    observation=before,
+                    history=step_records,
+                    action=original_action,
+                )
+                if rewritten_action is not original_action:
+                    decision.action = rewritten_action
+                    decision.rationale = "；".join(
+                        part
+                        for part in [
+                            decision.rationale,
+                            rewritten_action.reasoning or "运行时检测到表单重复点击，改为直接输入。",
+                        ]
+                        if part
+                    )
             source_label = "脚本动作" if planning.scripted else "模型动态规划"
             self.runtime_console.planning(
                 step_index=step_index,
@@ -606,6 +626,119 @@ class AgentRunner:
             if record.action.action_type in {"click", "double_click"} and record.action.coordinates is not None
         ]
         return len(recent_clicks) >= 2
+
+    def _maybe_rewrite_redundant_form_click(
+        self,
+        task: TaskSpec,
+        observation: Observation,
+        history: list[StepRecord],
+        action: ActionStep,
+    ) -> ActionStep:
+        if action.action_type not in {"click", "double_click"}:
+            return action
+        if task.product != "calendar":
+            return action
+        if not self._calendar_editor_visible(observation):
+            return action
+
+        title = self._calendar_event_title(task)
+        if self._history_has_text_entry(history, title):
+            return action
+        if not self._has_repeated_calendar_click_stall(history, action):
+            return action
+
+        original_coordinates = list(action.coordinates) if action.coordinates else None
+        return ActionStep(
+            action_type="type_text",
+            description=f"输入日程主题“{title}”",
+            text=title,
+            confidence=max(action.confidence, 0.75),
+            reasoning=(
+                "检测到创建日程窗口中已连续点击表单区域但任务进度没有提升，"
+                "主题尚未输入，下一步应直接输入主题而不是继续点击。"
+            ),
+            validation_hint=title,
+            metadata={
+                "rewrite_reason": "calendar_repeated_form_click_to_title_input",
+                "original_action_type": action.action_type,
+                "original_coordinates": original_coordinates,
+            },
+        )
+
+    def _calendar_editor_visible(self, observation: Observation) -> bool:
+        markers = ("创建日程", "新建日程", "添加主题", "添加参与人", "会议室")
+        if any(marker in observation.flattened_text for marker in markers):
+            return True
+
+        candidates = observation.ui_hints.get("window_candidates")
+        if isinstance(candidates, list):
+            for candidate in candidates:
+                if not isinstance(candidate, dict):
+                    continue
+                title = str(candidate.get("title", ""))
+                role = str(candidate.get("role", ""))
+                active = bool(candidate.get("active", False))
+                if any(marker in title for marker in ("创建日程", "新建日程")):
+                    return True
+                if active and role in {"active_child", "overlap_child"} and "日程" in title:
+                    return True
+        return False
+
+    def _calendar_event_title(self, task: TaskSpec) -> str:
+        patterns = (
+            r"主题为[“\"']([^”\"']+)[”\"']",
+            r"标题[为是]?[“\"']([^”\"']+)[”\"']",
+            r"名为[“\"']([^”\"']+)[”\"']",
+        )
+        for pattern in patterns:
+            match = re.search(pattern, task.instruction)
+            if match:
+                return match.group(1).strip()
+        return "项目周会"
+
+    def _history_has_text_entry(self, history: list[StepRecord], text: str) -> bool:
+        return any(
+            record.action.action_type == "type_text"
+            and record.action.text == text
+            and record.error is None
+            for record in history
+        )
+
+    def _has_repeated_calendar_click_stall(self, history: list[StepRecord], action: ActionStep) -> bool:
+        recent_clicks = [
+            record
+            for record in history[-4:]
+            if record.action.action_type in {"click", "double_click"}
+            and record.action.coordinates is not None
+        ]
+        if len(recent_clicks) < 2:
+            return False
+
+        stalled_clicks = [
+            record
+            for record in recent_clicks
+            if not record.success
+            and (
+                (
+                    record.validation is not None
+                    and record.validation.strategy in {"progress_stall", "hint_contains", "vlm_semantic"}
+                )
+                or (
+                    record.progress_assessment is not None
+                    and record.progress_assessment.completion_score < 0.9
+                )
+            )
+        ]
+        if len(stalled_clicks) >= 2:
+            return True
+
+        if action.coordinates is None:
+            return False
+        coords = [record.action.coordinates for record in recent_clicks[-2:] if record.action.coordinates is not None]
+        coords.append(action.coordinates)
+        xs = [coord[0] for coord in coords]
+        ys = [coord[1] for coord in coords]
+        return max(xs) - min(xs) <= 160 and max(ys) - min(ys) <= 120
 
     def _success_rate(self, step_records: list[StepRecord]) -> float:
         if not step_records:

@@ -327,19 +327,8 @@ class OpenAICompatibleVisionPolicy(VisionPolicy):
         planning_hints: Sequence[ActionStep] | None = None,
         latest_reflection: ReflectionResult | None = None,
     ) -> str:
-        recent_actions = [
-            " | ".join(
-                part
-                for part in [
-                    f"{record.index}.{record.attempt} {record.action.action_type}: {record.action.description}",
-                    f"success={record.success}",
-                    f"validation={record.validation.summary}" if record.validation else "",
-                    f"reflection={record.reflection.suggested_strategy}" if record.reflection else "",
-                ]
-                if part
-            )
-            for record in history[-5:]
-        ]
+        recent_actions = self._format_recent_actions(history)
+        interaction_patterns = self._summarize_interaction_patterns(task, observation, history)
         hint_lines = [
             f"{index}. {hint.action_type}: {hint.description}"
             f"{f' | text={hint.text}' if hint.text else ''}"
@@ -376,6 +365,7 @@ For hotkeys, return hotkey as an array such as ["ctrl","k"], never as one combin
 For Chinese or mixed-language input, use type_text with the exact text to paste.
 For form fields, do not keep clicking the same empty field. After a field is focused, immediately use type_text with the exact value.
 When a Calendar "创建日程" or event editor window is open, fill fields in this practical order: title "项目周会", time "明天下午2点", attendee "张三", then save/create. Prefer type_text over repeated click once the editor is visible.
+If recent actions show repeated clicks on the same field or nearby coordinates without progress, assume the field is already focused. Do not click it again; type the required value or choose a genuinely different path.
 If the target chat is already open and the message box is visible, the next useful action is type_text with "Hello World"; do not keep clicking the same message box.
 If "Hello World" is already typed in the message box, the next useful action is hotkey ["enter"] or clicking the send button.
 Avoid repeating the same click coordinate when recent actions show no progress.
@@ -404,12 +394,114 @@ Remaining steps:
 Recent actions:
 {recent_actions}
 
+Detected interaction patterns:
+{interaction_patterns}
+
 Latest reflection:
 {reflection_text}
 
 Optional scripted hints:
 {hint_lines}
 """.strip()
+
+    def _format_recent_actions(self, history: Sequence[StepRecord]) -> list[str]:
+        return [self._format_step_record(record) for record in history[-6:]]
+
+    def _format_step_record(self, record: StepRecord) -> str:
+        action = record.action
+        parts = [f"{record.index}.{record.attempt} {action.action_type}: {action.description}"]
+        if action.text:
+            parts.append(f"text={action.text}")
+        if action.hotkey:
+            parts.append(f"hotkey={'+'.join(action.hotkey)}")
+        if action.coordinates:
+            parts.append(f"coords={action.coordinates}")
+        normalized = action.metadata.get("normalized_coordinates")
+        if isinstance(normalized, (list, tuple)) and len(normalized) == 2:
+            parts.append(f"normalized=({normalized[0]}, {normalized[1]})")
+        screen_coordinates = record.execution_meta.get("screen_coordinates")
+        if isinstance(screen_coordinates, (list, tuple)) and len(screen_coordinates) == 2:
+            parts.append(f"screen=({screen_coordinates[0]}, {screen_coordinates[1]})")
+        parts.append(f"success={record.success}")
+        if record.validation:
+            parts.append(f"validation={record.validation.strategy}: {record.validation.summary}")
+        if record.progress_assessment:
+            progress = record.progress_assessment
+            parts.append(
+                "progress="
+                f"{progress.completion_score:.2f}/{progress.progress_label}: {progress.summary}"
+            )
+        if record.reflection:
+            reflection = record.reflection
+            parts.append(
+                "reflection="
+                f"replan={reflection.should_replan}; "
+                f"stage={reflection.failure_stage}; "
+                f"root={reflection.root_cause}; "
+                f"strategy={reflection.suggested_strategy}"
+            )
+        if record.replan_reason:
+            parts.append(f"replan_reason={record.replan_reason.value}")
+        if record.error:
+            parts.append(f"error={record.error}")
+        return " | ".join(parts)
+
+    def _summarize_interaction_patterns(
+        self,
+        task: TaskSpec,
+        observation: Observation,
+        history: Sequence[StepRecord],
+    ) -> list[str]:
+        patterns: list[str] = []
+        recent_clicks = [
+            record
+            for record in history[-4:]
+            if record.action.action_type in {"click", "double_click"}
+            and record.action.coordinates is not None
+        ]
+        if len(recent_clicks) >= 2:
+            coords = [record.action.coordinates for record in recent_clicks if record.action.coordinates is not None]
+            if self._coordinates_are_clustered(coords):
+                coord_text = ", ".join(str(coord) for coord in coords)
+                patterns.append(
+                    "Recent click stall: the last visible clicks are clustered at "
+                    f"{coord_text}. Treat that field/area as already focused unless the screenshot changed."
+                )
+            stalled_records = [
+                record
+                for record in recent_clicks
+                if not record.success
+                and record.validation is not None
+                and record.validation.strategy in {"progress_stall", "hint_contains", "vlm_semantic"}
+            ]
+            if len(stalled_records) >= 2:
+                patterns.append(
+                    "Repeated click failures: multiple recent clicks failed validation or made no progress. "
+                    "The next action must avoid another similar click."
+                )
+
+        visible_text = observation.flattened_text
+        if task.product == "calendar" and any(
+            marker in visible_text for marker in ("创建日程", "新建日程", "添加主题")
+        ):
+            typed_texts = [
+                record.action.text
+                for record in history
+                if record.action.action_type == "type_text" and record.action.text
+            ]
+            patterns.append(
+                "Calendar event editor is visible. If the title field is empty or selected and "
+                '"项目周会" has not been successfully typed, use type_text for the title before more clicks. '
+                f"Typed so far: {typed_texts or 'none'}."
+            )
+        return patterns or ["None detected."]
+
+    def _coordinates_are_clustered(self, coords: Sequence[tuple[int, int]], radius: int = 160) -> bool:
+        if len(coords) < 2:
+            return False
+        xs = [coord[0] for coord in coords]
+        ys = [coord[1] for coord in coords]
+        return max(xs) - min(xs) <= radius and max(ys) - min(ys) <= radius
 
     def _build_validation_prompt(
         self,
