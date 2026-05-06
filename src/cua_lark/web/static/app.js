@@ -29,6 +29,7 @@ const els = {
   taskValue: document.querySelector("#taskValue"),
   durationValue: document.querySelector("#durationValue"),
   modeValue: document.querySelector("#modeValue"),
+  runIndicator: document.querySelector("#runIndicator"),
   logStream: document.querySelector("#logStream"),
   logCount: document.querySelector("#logCount"),
   clearLogsButton: document.querySelector("#clearLogsButton"),
@@ -119,11 +120,21 @@ function renderCaseSummary() {
   }
   els.taskValue.textContent = item.id;
   els.caseSummary.innerHTML = `
-    <strong>${escapeHtml(item.id)}</strong><br />
-    产品：${escapeHtml(item.product)}<br />
-    路径：${escapeHtml(item.path)}<br />
-    提示动作：${item.scripted_action_count}<br />
-    指令：${escapeHtml(item.instruction)}
+    <div class="case-title-row">
+      <strong>${escapeHtml(item.id)}</strong>
+      <span class="case-product">${escapeHtml(item.product)}</span>
+    </div>
+    <div class="case-meta">
+      <div class="case-meta-row">
+        <span>路径</span>
+        <code>${escapeHtml(item.path)}</code>
+      </div>
+      <div class="case-meta-row">
+        <span>动作</span>
+        <code>${escapeHtml(String(item.scripted_action_count))}</code>
+      </div>
+    </div>
+    <p class="case-instruction">${escapeHtml(item.instruction)}</p>
   `;
 }
 
@@ -209,6 +220,7 @@ function renderRun() {
   const run = state.run;
   if (!run) {
     updateRunningControls(false);
+    updateRunIndicator(null);
     return;
   }
   const isActive = !terminalStatuses.has(run.status);
@@ -217,6 +229,7 @@ function renderRun() {
   els.taskValue.textContent = run.task_id || "未选择";
   els.durationValue.textContent = `${Number(run.duration_seconds || 0).toFixed(2)}s`;
   els.modeValue.textContent = run.mode === "desktop" ? "Desktop" : "Mock";
+  updateRunIndicator(run.status);
   els.openReportButton.disabled = !run.report_available;
   state.visibleLogs = run.logs || [];
   renderLogs();
@@ -234,7 +247,7 @@ function renderLogs() {
   els.logStream.innerHTML = logs
     .map(
       (item) => `
-        <div class="log-line">
+        <div class="log-line ${stageClass(item.stage)}">
           <span class="log-time">${escapeHtml(item.timestamp)}</span>
           <span class="log-stage">[${escapeHtml(item.stage)}]</span>
           <span class="log-message">${escapeHtml(item.message)}</span>
@@ -255,7 +268,7 @@ function renderMetrics(metrics) {
     .map(
       ([key, value]) => `
         <div class="metric-tile">
-          <span>${escapeHtml(key)}</span>
+          <span>${escapeHtml(formatMetricLabel(key))}</span>
           <strong>${escapeHtml(String(value))}</strong>
         </div>
       `,
@@ -321,6 +334,19 @@ function updateRunningControls(isActive) {
   els.stopButton.disabled = !isActive;
 }
 
+function updateRunIndicator(status) {
+  if (!els.runIndicator) {
+    return;
+  }
+  const normalized = status || "idle";
+  els.runIndicator.className = `run-indicator is-${normalized}`;
+  const label = formatStatus(status);
+  const labelEl = els.runIndicator.querySelector("strong");
+  if (labelEl) {
+    labelEl.textContent = label;
+  }
+}
+
 function formatStatus(status) {
   const mapping = {
     queued: "排队中",
@@ -332,6 +358,39 @@ function formatStatus(status) {
     error: "异常",
   };
   return mapping[status] || status || "空闲";
+}
+
+function formatMetricLabel(key) {
+  const mapping = {
+    step_attempts: "步骤尝试",
+    step_success_rate: "步骤成功率",
+    successful_steps: "成功步骤",
+    failed_steps: "失败步骤",
+    retries: "重试次数",
+    load_wait_rounds: "加载等待",
+    load_timeouts: "加载超时",
+    replans: "重规划",
+    max_steps: "最大步骤",
+    max_retries: "最大重试",
+  };
+  return mapping[key] || key;
+}
+
+function stageClass(stage) {
+  const text = String(stage || "").toLowerCase();
+  if (text.includes("异常") || text.includes("失败") || text.includes("error")) {
+    return "stage-error";
+  }
+  if (text.includes("规划") || text.includes("思考") || text.includes("重规划")) {
+    return "stage-planning";
+  }
+  if (text.includes("校验") || text.includes("总验")) {
+    return "stage-validation";
+  }
+  if (text.includes("结果") || text.includes("完成") || text.includes("总进度")) {
+    return "stage-success";
+  }
+  return "";
 }
 
 async function requestJson(url, options = {}) {

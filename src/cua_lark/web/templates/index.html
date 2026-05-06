@@ -10,9 +10,15 @@
   <body>
     <div class="app-shell">
       <header class="topbar">
-        <div>
-          <h1>CUA-Lark GUI 控制台</h1>
-          <p id="environmentLine">正在读取运行环境</p>
+        <div class="brand-block">
+          <div class="brand-mark" aria-hidden="true">
+            <i data-lucide="bot"></i>
+          </div>
+          <div class="brand-copy">
+            <span class="eyebrow">Desktop Agent Console</span>
+            <h1>CUA-Lark GUI 控制台</h1>
+            <p id="environmentLine">正在读取运行环境</p>
+          </div>
         </div>
         <div class="topbar-actions">
           <button class="icon-button" id="refreshButton" type="button" title="刷新">
@@ -26,6 +32,10 @@
 
       <main class="workspace">
         <aside class="control-panel">
+          <div class="panel-kicker">
+            <span>控制参数</span>
+            <i data-lucide="settings-2"></i>
+          </div>
           <section class="panel-section">
             <div class="section-title">
               <i data-lucide="list-checks"></i>
@@ -87,6 +97,16 @@
         </aside>
 
         <section class="run-panel">
+          <div class="run-heading">
+            <div>
+              <span class="eyebrow">Runtime</span>
+              <h2>任务运行台</h2>
+            </div>
+            <div class="run-indicator" id="runIndicator">
+              <span></span>
+              <strong>空闲</strong>
+            </div>
+          </div>
           <div class="status-strip">
             <div class="status-block">
               <span>当前状态</span>
